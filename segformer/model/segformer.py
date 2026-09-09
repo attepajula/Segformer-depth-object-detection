@@ -71,23 +71,30 @@ class SegFormer(nn.Module):
         mx.eval(lab)
         return cv2.resize(np.array(lab), (w, h), interpolation=cv2.INTER_NEAREST).astype(np.int32)
 
-    def predict(self, rgb_uint8: np.ndarray, class_ids: list[int]):
-        """Fast path for the segmenter backend.
+    def class_probs(self, rgb_uint8: np.ndarray, class_ids: list[int]) -> np.ndarray:
+        """Softmax probability maps for ``class_ids`` only, at frame resolution.
 
-        Returns (label_map (H,W) int32, probs (H,W,len(class_ids)) float32) —
-        softmax computed only for ``class_ids``, at model resolution, then
-        upsampled (labels nearest, probs bilinear).
+        (H, W, len(class_ids)) float32. Computed at model resolution then
+        bilinearly upsampled. The segmenter thresholds these directly — argmax
+        over-includes neighbouring wall for the 'door' class.
         """
         import cv2
 
         h, w = rgb_uint8.shape[:2]
         low = self(self._preprocess(rgb_uint8))[0]                     # (hs, ws, 150)
-        lab_low = mx.argmax(low, axis=-1).astype(mx.uint16)
         prob_low = mx.softmax(low, axis=-1)[:, :, mx.array(class_ids)]  # (hs, ws, T)
-        mx.eval(lab_low, prob_low)
-
-        lab = cv2.resize(np.array(lab_low), (w, h), interpolation=cv2.INTER_NEAREST).astype(np.int32)
+        mx.eval(prob_low)
         prob = cv2.resize(np.array(prob_low), (w, h), interpolation=cv2.INTER_LINEAR)
-        if prob.ndim == 2:  # cv2 drops a size-1 last axis
-            prob = prob[:, :, None]
+        return prob[:, :, None] if prob.ndim == 2 else prob
+
+    # kept for tests / inspection
+    def predict(self, rgb_uint8: np.ndarray, class_ids: list[int]):
+        prob = self.class_probs(rgb_uint8, class_ids)
+        # argmax label restricted to background + the requested classes
+        import cv2
+
+        h, w = rgb_uint8.shape[:2]
+        low = self(self._preprocess(rgb_uint8))[0]
+        lab = cv2.resize(np.array(mx.argmax(low, axis=-1).astype(mx.uint16)),
+                         (w, h), interpolation=cv2.INTER_NEAREST).astype(np.int32)
         return lab, prob

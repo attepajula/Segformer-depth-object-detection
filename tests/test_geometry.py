@@ -35,7 +35,7 @@ def test_wall_sized_rejected():
     pts, valid = backproject(depth, INTR)
     g = door_gate(_rect(20, 0, 620, H), pts, valid, INTR)
     assert not g.keep
-    assert g.reason in ("fills-frame", "wall-sized")
+    assert g.reason in ("fills-frame", "wall-sized", "width-out-of-range")
 
 
 def test_floor_rejected_as_not_vertical():

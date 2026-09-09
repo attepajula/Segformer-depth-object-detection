@@ -16,15 +16,20 @@ import numpy as np
 
 from segformer.frame import Intrinsics
 
-DOOR_W = (0.5, 1.5)          # metric width range for a door leaf/opening
-DOOR_H_MIN = 1.5             # a door is tall
-WALL_W = 2.0                 # wider => wall
-NO_DEPTH_MAX_FRAC = 0.45     # without depth: reject a blob bigger than this
-NO_DEPTH_MAX_ASPECT = 1.3    # without depth: reject wider-than-tall (w/h)
-MIN_VALID_FRAC = 0.30        # need this much of the mask to carry depth
-PLANE_TOL = 0.05             # m
-PLANE_INLIER = 0.55
-MAX_NORMAL_Y = 0.5           # |n_y|: 0 vertical surface, 1 floor/ceiling
+# The mask reaching here is a high-probability door core (wall fringe already
+# dropped by the prob threshold), and the door is often only partly in frame
+# (short USB tether) — so height is a weak signal, width + planarity + vertical
+# do the work.
+DOOR_W = (0.4, 1.9)          # single leaf .. wide / double
+DOOR_H_MIN = 0.9            # tolerate a cropped door
+DOOR_H_MAX = 2.7
+WALL_W = 2.3                 # wider => wall
+NO_DEPTH_MAX_FRAC = 0.55     # without depth: reject a blob bigger than this
+NO_DEPTH_MAX_ASPECT = 1.6    # without depth: reject much-wider-than-tall
+MIN_VALID_FRAC = 0.25        # need this much of the mask to carry depth
+PLANE_TOL = 0.06             # m
+PLANE_INLIER = 0.45
+MAX_NORMAL_Y = 0.55          # |n_y|: 0 vertical surface, 1 floor/ceiling
 
 
 @dataclass
@@ -90,8 +95,8 @@ def door_gate(mask: np.ndarray, points: np.ndarray, valid: np.ndarray,
         g.keep, g.reason = False, "wall-sized"
     elif not (DOOR_W[0] <= g.width_m <= DOOR_W[1]):
         g.keep, g.reason = False, "width-out-of-range"
-    elif g.height_m < DOOR_H_MIN:
-        g.keep, g.reason = False, "too-short"
+    elif not (DOOR_H_MIN <= g.height_m <= DOOR_H_MAX):
+        g.keep, g.reason = False, "height-out-of-range"
     elif inlier < PLANE_INLIER:
         g.keep, g.reason = False, "not-planar"
     elif g.normal_y > MAX_NORMAL_Y:
