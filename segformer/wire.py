@@ -12,8 +12,8 @@ from __future__ import annotations
 import msgpack
 import numpy as np
 
-from seqformer import WIRE_SCHEMA_VERSION
-from seqformer.frame import Frame, Intrinsics
+from segformer import WIRE_SCHEMA_VERSION
+from segformer.frame import Frame, Intrinsics
 
 try:
     import lz4.block as _lz4

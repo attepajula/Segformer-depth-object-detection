@@ -12,8 +12,8 @@ from collections.abc import Iterator
 
 import zmq
 
-from seqformer.frame import Frame
-from seqformer.wire import decode_frame
+from segformer.frame import Frame
+from segformer.wire import decode_frame
 
 DEFAULT_ENDPOINT = "tcp://127.0.0.1:5556"
 

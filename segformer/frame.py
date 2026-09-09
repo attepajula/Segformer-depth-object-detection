@@ -1,7 +1,7 @@
 """Decoded frame — the consumer-side view of the capture pipeline's contract.
 
 Mirrors ``capture/frame.py`` schema v1. Kept as an independent copy on purpose:
-seqformer must not import the capture package. If the wire schema bumps, update
+segformer must not import the capture package. If the wire schema bumps, update
 ``WIRE_SCHEMA_VERSION`` and this file together.
 """
 

@@ -5,8 +5,8 @@ import msgpack
 import numpy as np
 import pytest
 
-from seqformer.backends import make_segmenter
-from seqformer.wire import WireError, decode_frame, decode_header
+from segformer.backends import make_segmenter
+from segformer.wire import WireError, decode_frame, decode_header
 
 
 def _encode(rgb, depth, *, frame_id=1, device="fake", registered=True, schema_version=1):

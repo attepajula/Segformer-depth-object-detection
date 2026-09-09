@@ -1,11 +1,8 @@
-"""``seqformer`` CLI — SCAFFOLD.
+"""``segformer`` CLI.
 
-Planned subcommands:
-    seqformer run   --endpoint tcp://127.0.0.1:5556 --backend torch-mps [--overlay]
-    seqformer bench --backend torch-mps --frames 300
-    seqformer probe --endpoint ...        # subscribe, decode, print frame stats
-
-Only ``probe`` is wired (it needs no model); the rest raise NotImplementedError.
+    segformer probe [--endpoint ...]                  decode one frame, print stats
+    segformer run   [--backend mlx] [--overlay|--save DIR] [--max-frames N]
+    segformer bench [--backend mlx] [--frames N]      per-frame latency / fps
 """
 
 from __future__ import annotations
@@ -17,7 +14,7 @@ import sys
 def cmd_probe(args) -> int:
     import zmq
 
-    from seqformer.wire import decode_frame
+    from segformer.wire import decode_frame
 
     ctx = zmq.Context.instance()
     sock = ctx.socket(zmq.SUB)
@@ -39,9 +36,9 @@ def cmd_probe(args) -> int:
 
 
 def cmd_run(args) -> int:
-    from seqformer.backends import make_segmenter
-    from seqformer.consumer import FrameConsumer, RateMeter
-    from seqformer import overlay
+    from segformer.backends import make_segmenter
+    from segformer.consumer import FrameConsumer, RateMeter
+    from segformer import overlay
 
     seg = make_segmenter(args.backend)
     seg.load(args.checkpoint)
@@ -57,7 +54,7 @@ def cmd_run(args) -> int:
         save_dir = pathlib.Path(args.save)
         save_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"seqformer run: backend={seg.name} endpoint={args.endpoint} "
+    print(f"segformer run: backend={seg.name} endpoint={args.endpoint} "
           f"overlay={args.overlay} save={args.save or '-'}")
     try:
         for frame in consumer.frames():
@@ -100,14 +97,47 @@ def _write_png(path, rgb) -> None:
 
 
 def cmd_bench(args) -> int:
-    raise NotImplementedError("seqformer bench — not wired yet")
+    import time
+
+    from segformer.backends import make_segmenter
+    from segformer.consumer import FrameConsumer
+
+    seg = make_segmenter(args.backend)
+    t = time.time()
+    seg.load()
+    print(f"load {time.time() - t:.1f}s")
+
+    consumer = FrameConsumer(args.endpoint)
+    f = None
+    while f is None:
+        f = consumer.recv()
+    seg.infer(f, None)  # warmup: first infer compiles Metal kernels
+
+    durs: list[float] = []
+    state = None
+    while len(durs) < args.frames:
+        f = consumer.recv()
+        if f is None:
+            continue
+        t0 = time.perf_counter()
+        _, state = seg.infer(f, state)
+        durs.append(time.perf_counter() - t0)
+    consumer.close()
+    seg.close()
+
+    d = sorted(durs)
+    n = len(d)
+    print(f"{seg.name}: {n} frames  mean {1000 * sum(d) / n:.1f} ms "
+          f"({n / sum(d):.1f} fps)  p50 {1000 * d[n // 2]:.1f}  "
+          f"p90 {1000 * d[int(n * 0.9)]:.1f}  max {1000 * d[-1]:.1f}")
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--endpoint", default="tcp://127.0.0.1:5556")
 
-    p = argparse.ArgumentParser(prog="seqformer", description=__doc__, parents=[common],
+    p = argparse.ArgumentParser(prog="segformer", description=__doc__, parents=[common],
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -122,7 +152,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--max-frames", type=int, default=0)
     sp.set_defaults(func=cmd_run)
 
-    sp = sub.add_parser("bench", parents=[common], help="[stub] fps benchmark")
+    sp = sub.add_parser("bench", parents=[common], help="per-frame latency / fps")
     sp.add_argument("--backend", default="mlx", choices=["mlx", "torch-mps", "dummy"])
     sp.add_argument("--frames", type=int, default=300)
     sp.set_defaults(func=cmd_bench)

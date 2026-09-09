@@ -1,7 +1,7 @@
 """No-model segmenter: emits one instance covering the valid-depth region.
 
 Not a real model. Exists so the pipeline (consumer -> segmenter -> overlay) can
-be wired and tested before SeqFormer lands.
+be wired and tested before SegFormer lands.
 """
 
 from __future__ import annotations
@@ -10,8 +10,8 @@ from typing import Any
 
 import numpy as np
 
-from seqformer.frame import Frame
-from seqformer.segmenter import Instance, SegResult, Segmenter
+from segformer.frame import Frame
+from segformer.segmenter import Instance, SegResult, Segmenter
 
 
 class DummySegmenter(Segmenter):

@@ -1,13 +1,14 @@
 """Framework-agnostic segmentation interface.
 
-Everything downstream (CLI, overlay, tracking, eval) talks to :class:`Segmenter`
-and :class:`SegResult` only. A PyTorch/MPS implementation and an MLX one are
-drop-in interchangeable — pick at construction time via
-``seqformer.backends.make_segmenter``.
+Everything downstream (CLI, overlay, eval) talks to :class:`Segmenter` and
+:class:`SegResult` only. Backends (MLX, torch-mps, dummy) are drop-in
+interchangeable — pick at construction time via
+``segformer.backends.make_segmenter``.
 
-SeqFormer is a *video* instance segmentation model: it attends across a short
-clip of frames. ``infer`` therefore takes the current frame plus the model's
-own rolling state, and returns updated state alongside the result.
+``infer`` takes the current frame plus an opaque ``state`` and returns an
+updated state, so a stateful backend (temporal smoothing, tracking) fits
+without changing callers. SegFormer itself is per-frame — its backend ignores
+``state``.
 """
 
 from __future__ import annotations
@@ -18,16 +19,16 @@ from typing import Any
 
 import numpy as np
 
-from seqformer.frame import Frame
+from segformer.frame import Frame
 
 
 @dataclass
 class Instance:
-    """One segmented instance in one frame."""
+    """One segmented region in one frame (a connected component of a class)."""
 
-    instance_id: int          # stable across the clip (tracking id)
-    label: int                # class index
-    score: float              # confidence in [0, 1]
+    instance_id: int          # unique within the frame
+    label: int                # ADE20K class id (see model.config.ADE20K_TARGETS)
+    score: float              # mean class probability over the mask, [0, 1]
     mask: np.ndarray          # (H, W) bool
     box_xyxy: tuple[float, float, float, float]
 
@@ -48,13 +49,13 @@ class SegResult:
 
 
 class Segmenter(ABC):
-    """Stateful video-instance segmenter.
+    """A frame segmenter.
 
     Lifecycle: ``load()`` once, then ``infer()`` per frame, ``reset()`` on a
-    stream discontinuity (e.g. replay loop, camera reopen).
+    stream discontinuity (replay loop, camera reopen).
     """
 
-    #: short backend name, e.g. "torch-mps", "mlx"
+    #: short backend name, e.g. "mlx", "torch-mps", "dummy"
     name: str = "abstract"
 
     @abstractmethod
@@ -63,7 +64,7 @@ class Segmenter(ABC):
 
     @abstractmethod
     def infer(self, frame: Frame, state: Any | None) -> tuple[SegResult, Any]:
-        """Segment ``frame`` given rolling clip ``state``; return (result, new_state)."""
+        """Segment ``frame`` given opaque ``state``; return (result, new_state)."""
 
     def reset(self) -> None:
         """Drop rolling state at a stream boundary. Override if stateful."""
