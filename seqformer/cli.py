@@ -39,7 +39,64 @@ def cmd_probe(args) -> int:
 
 
 def cmd_run(args) -> int:
-    raise NotImplementedError("seqformer run — consumer loop not wired yet")
+    from seqformer.backends import make_segmenter
+    from seqformer.consumer import FrameConsumer, RateMeter
+    from seqformer import overlay
+
+    seg = make_segmenter(args.backend)
+    seg.load(args.checkpoint)
+    consumer = FrameConsumer(args.endpoint)
+    meter = RateMeter()
+    state = None
+    prev_id = None
+    n = 0
+    save_dir = None
+    if args.save:
+        import pathlib
+
+        save_dir = pathlib.Path(args.save)
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"seqformer run: backend={seg.name} endpoint={args.endpoint} "
+          f"overlay={args.overlay} save={args.save or '-'}")
+    try:
+        for frame in consumer.frames():
+            if frame is None:
+                print("  waiting for frames...")
+                continue
+            if prev_id is not None and frame.frame_id <= prev_id:
+                seg.reset()          # stream restarted (replay loop / reopen)
+                state = None
+            prev_id = frame.frame_id
+
+            result, state = seg.infer(frame, state)
+            fps = meter.tick()
+
+            if args.overlay or save_dir is not None:
+                img = overlay.render(frame, result, fps=fps)
+                if save_dir is not None:
+                    _write_png(save_dir / f"{frame.frame_id:06d}.png", img)
+                if args.overlay and not overlay.show(img):
+                    break
+            else:
+                print(f"  frame {frame.frame_id}  inst={len(result.instances)}  {fps:4.1f} fps")
+
+            n += 1
+            if args.max_frames and n >= args.max_frames:
+                break
+    except KeyboardInterrupt:
+        pass
+    finally:
+        consumer.close()
+        seg.close()
+    print(f"processed {n} frames")
+    return 0
+
+
+def _write_png(path, rgb) -> None:
+    import cv2
+
+    cv2.imwrite(str(path), rgb[:, :, ::-1])
 
 
 def cmd_bench(args) -> int:
@@ -47,21 +104,26 @@ def cmd_bench(args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="seqformer", description=__doc__,
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--endpoint", default="tcp://127.0.0.1:5556")
+
+    p = argparse.ArgumentParser(prog="seqformer", description=__doc__, parents=[common],
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--endpoint", default="tcp://127.0.0.1:5556")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    sp = sub.add_parser("probe", help="subscribe, decode one frame, print stats")
+    sp = sub.add_parser("probe", parents=[common], help="subscribe, decode one frame, print stats")
     sp.set_defaults(func=cmd_probe)
 
-    sp = sub.add_parser("run", help="[stub] consume + segment + overlay")
-    sp.add_argument("--backend", default="torch-mps", choices=["torch-mps", "mlx", "dummy"])
-    sp.add_argument("--overlay", action="store_true")
+    sp = sub.add_parser("run", parents=[common], help="consume + segment + overlay")
+    sp.add_argument("--backend", default="mlx", choices=["mlx", "torch-mps", "dummy"])
+    sp.add_argument("--checkpoint", default=None)
+    sp.add_argument("--overlay", action="store_true", help="OpenCV window")
+    sp.add_argument("--save", default=None, metavar="DIR", help="write overlay PNGs")
+    sp.add_argument("--max-frames", type=int, default=0)
     sp.set_defaults(func=cmd_run)
 
-    sp = sub.add_parser("bench", help="[stub] fps benchmark")
-    sp.add_argument("--backend", default="torch-mps", choices=["torch-mps", "mlx", "dummy"])
+    sp = sub.add_parser("bench", parents=[common], help="[stub] fps benchmark")
+    sp.add_argument("--backend", default="mlx", choices=["mlx", "torch-mps", "dummy"])
     sp.add_argument("--frames", type=int, default=300)
     sp.set_defaults(func=cmd_bench)
 
