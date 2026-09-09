@@ -40,6 +40,20 @@ class _Latest:
         return item
 
 
+def _show_waiting(endpoint: str) -> bool:
+    """Blank 'waiting' frame so the window opens and stays quittable. False = quit."""
+    import cv2
+    import numpy as np
+
+    img = np.zeros((240, 640, 3), np.uint8)
+    cv2.putText(img, "waiting for frames", (20, 110),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.9, (200, 200, 200), 2)
+    cv2.putText(img, endpoint, (20, 150),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (120, 120, 120), 1)
+    cv2.imshow("segformer", img)
+    return (cv2.waitKey(30) & 0xFF) != ord("q")
+
+
 def run_threaded(endpoint: str, segmenter, *, show: bool = True,
                  save_dir=None, max_frames: int = 0) -> int:
     stop = threading.Event()
@@ -76,11 +90,22 @@ def run_threaded(endpoint: str, segmenter, *, show: bool = True,
         save_dir = pathlib.Path(save_dir)
         save_dir.mkdir(parents=True, exist_ok=True)
 
+    import time
+
+    last_frame_at = time.monotonic()
+    last_warned = 0.0
     try:
         while not stop.is_set():
             item = latest.get(timeout=0.5)
             if item is None:
+                now = time.monotonic()
+                if now - last_frame_at > 1.0 and now - last_warned > 2.0:
+                    print(f"  waiting for frames on {endpoint} ...")
+                    last_warned = now
+                if show and not _show_waiting(endpoint):
+                    stop.set()
                 continue
+            last_frame_at = time.monotonic()
             frame, result = item
             img = overlay.render(frame, result, fps=state["fps"])   # infer fps
             if save_dir is not None:
