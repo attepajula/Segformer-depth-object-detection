@@ -17,7 +17,7 @@ and validated bit-exact against HF `transformers` (`tools/compare_hf.py`).
 xtion capture ──ZMQ PUB (schema v1)──▶  segformer run
                 tcp://127.0.0.1:5556      wire.decode ─▶ MlxSegmenter ─▶ overlay
                                           SegFormer-B0, ADE20K → door/railing masks
-                                          (depth post-process: TODO)
+                                          → depth gate (geometry.py)
 ```
 
 - **No coupling to the capture repo** — `segformer/wire.py` + `frame.py` are an
@@ -25,8 +25,10 @@ xtion capture ──ZMQ PUB (schema v1)──▶  segformer run
 - **Framework-agnostic** — everything talks to `segformer.segmenter.Segmenter` /
   `SegResult`. Backends: `mlx` (primary), `torch-mps` (secondary, stub),
   `dummy` (no model).
-- **Depth**: planned as a post-process — door = wall-flush plane, railing =
-  thin structure at a height. Model stays RGB-only. Not built yet.
+- **Depth gate** (`geometry.py`): B0 (37 mIoU) calls large flat surfaces
+  "door". The gate back-projects the mask to metric 3D and rejects anything
+  that fills the frame, isn't door-sized (~0.5–1.5 m wide, >1.5 m tall), isn't
+  planar, or isn't vertical. `MlxSegmenter(use_depth=True)`, on by default.
 
 ## Setup (Apple Silicon, native arm64)
 
@@ -88,16 +90,27 @@ then `segformer run --backend mlx --overlay`.
 | `model/` — MiT encoder + decode head (MLX) | done, HF-validated bit-exact |
 | `model/registry.py` + `models.toml` | done — pinned, sha256, offline-first |
 | `model/convert.py` — HF safetensors → MLX artifact | done |
-| `backends/mlx_backend.py` | done — ADE targets → connected-component instances |
+| `backends/mlx_backend.py` | done — score gate + depth gate + connected components |
 | `backends/torch_mps.py` | stub — secondary |
+| `geometry.py` — depth door gate | done (needs a real-door scene to tune true positives) |
 | `bench` command | done |
-| depth post-process (`geometry.py`) | **not built** |
-| perf: post-processing is CPU numpy, ~150 ms/frame (inference 77 ms) | to optimize |
+| perf: infer 42 ms / 24 fps (fp16, cv2 preprocess, model-res argmax/softmax) | ok |
+
+## Known limits
+
+- **B0 accuracy**: ~37 mIoU. Precision on doors comes from the depth gate, not
+  the model. b1–b5 ship only `pytorch_model.bin` (no safetensors) — a bigger
+  model needs a torch-based conversion into the registry.
+- **Depth gate true positives unverified** — every test scene so far has *no*
+  real door, so the gate rejecting everything B0 flags is correct but untested
+  on the keep path. Needs footage with an actual door.
+- **Live fps ~15–18** (< the 24 fps bench): decode + overlay + `imshow`, and
+  `capture serve` sharing the machine under Rosetta. A threaded consumer would
+  decouple display from throughput.
 
 ## Next
 
-1. Depth post-process: validate door masks against plane fit, railing against
-   thin-structure + height; drop false positives, close mask holes.
-2. Perf: argmax on GPU, per-target-class prob only, skip full 150-way softmax.
-3. Temporal smoothing (EMA on masks) — cheap stability win for a static scene.
-4. Try B2 if B0 accuracy is short.
+1. Railing depth cue: thin-structure / see-through-gap density, height band.
+2. Temporal EMA on masks — cheap stability for a static scene.
+3. Threaded consumer (infer thread + display thread) if live fps matters.
+4. Bigger model via a torch `.bin` → MLX conversion path in the registry.

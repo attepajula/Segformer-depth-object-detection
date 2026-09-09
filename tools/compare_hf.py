@@ -42,7 +42,7 @@ def main() -> int:
     from segformer.model import load_model
 
     model = load_model(f"segformer-{args.size}-ade")
-    pre = model._preprocess(rgb)                    # (1,512,512,3) NHWC, our pipeline
+    pre = model._preprocess(rgb, pil=True)                    # (1,512,512,3) NHWC, our pipeline
     mlx_low = model(pre)
 
     if args.own_preproc:

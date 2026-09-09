@@ -1,7 +1,10 @@
 """SegFormer semantic segmentation on MLX (Apple GPU). Primary backend.
 
-Pretrained on ADE20K; we surface the door / railing / bannister / screen-door
-classes as instances (one per connected component) and drop the rest.
+Pretrained on ADE20K; surface the door / railing / bannister / screen-door
+classes as instances (one per connected component). Two false-positive filters:
+  * ``score_thresh`` — drop low-confidence components
+  * depth gate (``use_depth``) — a "door" must be a door-sized planar vertical
+    surface; wall-sized / non-planar / floor-ish blobs are rejected.
 No temporal state — SegFormer is per-frame.
 """
 
@@ -15,14 +18,20 @@ from segformer.frame import Frame
 from segformer.model.config import ADE20K_TARGETS
 from segformer.segmenter import Instance, SegResult, Segmenter
 
+# ADE ids that get the door depth-gate
+_DOORLIKE = {14, 58}
+
 
 class MlxSegmenter(Segmenter):
     name = "mlx"
 
-    def __init__(self, model: str | None = None, min_area: int = 400,
+    def __init__(self, model: str | None = None, *, min_area: int = 600,
+                 score_thresh: float = 0.45, use_depth: bool = True,
                  targets: dict[int, str] | None = None):
-        self.model_name = model            # registry name; None => models.toml default
+        self.model_name = model
         self.min_area = min_area
+        self.score_thresh = score_thresh
+        self.use_depth = use_depth
         self.targets = targets or ADE20K_TARGETS
         self._model = None
 
@@ -39,6 +48,12 @@ class MlxSegmenter(Segmenter):
         target_ids = list(self.targets)
         lab, prob = self._model.predict(frame.rgb, target_ids)   # (H,W), (H,W,T)
 
+        points = valid = None
+        if self.use_depth:
+            from segformer.geometry import backproject
+
+            points, valid = backproject(frame.depth, frame.intrinsics)
+
         res = SegResult(frame_id=frame.frame_id, timestamp_ns=frame.timestamp_ns)
         next_id = 1
         for ti, ade_id in enumerate(target_ids):
@@ -50,12 +65,20 @@ class MlxSegmenter(Segmenter):
                 m = comp == c
                 if int(m.sum()) < self.min_area:
                     continue
+                score = float(prob[m, ti].mean())
+                if score < self.score_thresh:
+                    continue
+                if self.use_depth and ade_id in _DOORLIKE:
+                    from segformer.geometry import door_gate
+
+                    if not door_gate(m, points, valid, frame.intrinsics).keep:
+                        continue
                 ys, xs = np.where(m)
                 res.instances.append(
                     Instance(
                         instance_id=next_id,
                         label=ade_id,
-                        score=float(prob[m, ti].mean()),
+                        score=score,
                         mask=m,
                         box_xyxy=(float(xs.min()), float(ys.min()),
                                   float(xs.max()), float(ys.max())),
