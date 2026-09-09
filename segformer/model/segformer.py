@@ -41,13 +41,41 @@ class SegFormer(nn.Module):
         return mx.array(x[None])  # (1, 512, 512, 3)
 
     def logits(self, rgb_uint8: np.ndarray) -> mx.array:
-        """Full-resolution class logits (H, W, num_classes) for one RGB frame."""
+        """Full-resolution class logits (H, W, num_classes). Slow — materializes
+        H*W*150 floats. For inspection / parity tests, not the hot path."""
         h, w = rgb_uint8.shape[:2]
-        out = self(self._preprocess(rgb_uint8))          # (1, 128, 128, K)
-        out = _resize_to(out, h, w)                       # (1, H, W, K)
+        out = _resize_to(self(self._preprocess(rgb_uint8)), h, w)
         mx.eval(out)
         return out[0]
 
     def segment(self, rgb_uint8: np.ndarray) -> np.ndarray:
-        """(H, W) int32 ADE20K label map."""
-        return np.array(mx.argmax(self.logits(rgb_uint8), axis=-1).astype(mx.int32))
+        """(H, W) int32 ADE20K label map. argmax at model resolution, then
+        nearest-upsample the labels (150x less data than upsampling logits)."""
+        import cv2
+
+        h, w = rgb_uint8.shape[:2]
+        low = self(self._preprocess(rgb_uint8))              # (1, hs, ws, 150)
+        lab = mx.argmax(low[0], axis=-1).astype(mx.uint16)
+        mx.eval(lab)
+        return cv2.resize(np.array(lab), (w, h), interpolation=cv2.INTER_NEAREST).astype(np.int32)
+
+    def predict(self, rgb_uint8: np.ndarray, class_ids: list[int]):
+        """Fast path for the segmenter backend.
+
+        Returns (label_map (H,W) int32, probs (H,W,len(class_ids)) float32) —
+        softmax computed only for ``class_ids``, at model resolution, then
+        upsampled (labels nearest, probs bilinear).
+        """
+        import cv2
+
+        h, w = rgb_uint8.shape[:2]
+        low = self(self._preprocess(rgb_uint8))[0]           # (hs, ws, 150)
+        lab_low = mx.argmax(low, axis=-1).astype(mx.uint16)
+        prob_low = mx.softmax(low, axis=-1)[:, :, mx.array(class_ids)]  # (hs, ws, T)
+        mx.eval(lab_low, prob_low)
+
+        lab = cv2.resize(np.array(lab_low), (w, h), interpolation=cv2.INTER_NEAREST).astype(np.int32)
+        prob = cv2.resize(np.array(prob_low), (w, h), interpolation=cv2.INTER_LINEAR)
+        if prob.ndim == 2:  # cv2 drops a size-1 last axis
+            prob = prob[:, :, None]
+        return lab, prob

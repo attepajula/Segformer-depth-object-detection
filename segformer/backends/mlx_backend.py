@@ -35,30 +35,27 @@ class MlxSegmenter(Segmenter):
 
     def infer(self, frame: Frame, state: Any | None) -> tuple[SegResult, Any]:
         import cv2
-        import mlx.core as mx
 
-        logits = self._model.logits(frame.rgb)          # (H, W, 150) mlx
-        prob = np.array(mx.softmax(logits, axis=-1))
-        lab = prob.argmax(-1).astype(np.int32)
+        target_ids = list(self.targets)
+        lab, prob = self._model.predict(frame.rgb, target_ids)   # (H,W), (H,W,T)
 
         res = SegResult(frame_id=frame.frame_id, timestamp_ns=frame.timestamp_ns)
         next_id = 1
-        for ade_id, _name in self.targets.items():
-            cls_mask = lab == ade_id
+        for ti, ade_id in enumerate(target_ids):
+            cls_mask = (lab == ade_id).astype(np.uint8)
             if not cls_mask.any():
                 continue
-            n, comp = cv2.connectedComponents(cls_mask.astype(np.uint8))
+            n, comp = cv2.connectedComponents(cls_mask)
             for c in range(1, n):
                 m = comp == c
-                area = int(m.sum())
-                if area < self.min_area:
+                if int(m.sum()) < self.min_area:
                     continue
                 ys, xs = np.where(m)
                 res.instances.append(
                     Instance(
                         instance_id=next_id,
                         label=ade_id,
-                        score=float(prob[m, ade_id].mean()),
+                        score=float(prob[m, ti].mean()),
                         mask=m,
                         box_xyxy=(float(xs.min()), float(ys.min()),
                                   float(xs.max()), float(ys.max())),
