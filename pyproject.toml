@@ -1,0 +1,32 @@
+[project]
+name = "seqformer"
+version = "0.0.1"
+description = "Video instance segmentation consumer for the xtion RGB-D capture pipeline. Framework-agnostic Segmenter interface (PyTorch/MPS + MLX)."
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "numpy>=1.24",
+    "pyzmq>=25",
+    "msgpack>=1.0",
+]
+
+[project.optional-dependencies]
+# Apple GPU via PyTorch MPS. Deformable attention uses the pure-Python fallback
+# (the fused MSDeformAttn kernel is CUDA-only).
+torch = ["torch>=2.4", "torchvision>=0.19"]
+# Apple GPU via MLX. Needs a pure-MLX / custom-Metal MS-deform-attn (not written).
+mlx = ["mlx>=0.18"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+seqformer = "seqformer.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["seqformer"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
