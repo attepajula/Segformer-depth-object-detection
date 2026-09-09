@@ -2,7 +2,7 @@
 name = "seqformer"
 version = "0.0.1"
 description = "Video instance segmentation consumer for the xtion RGB-D capture pipeline. Framework-agnostic Segmenter interface (PyTorch/MPS + MLX)."
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.24",
     "pyzmq>=25",

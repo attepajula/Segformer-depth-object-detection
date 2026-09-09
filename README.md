@@ -25,10 +25,10 @@ xtion capture ──ZMQ PUB (schema v1)──▶  seqformer run
 ## Setup (Apple Silicon)
 
 Native arm64, unlike the capture process (which is x86_64/Rosetta for OpenNI2).
+Uses the system Homebrew Python (3.14); torch and mlx both ship 3.14 wheels.
 
 ```sh
-uv python install cpython-3.13-macos-aarch64
-uv venv --python cpython-3.13-macos-aarch64 .venv
+uv venv --python python3.14 .venv
 uv pip install --python .venv/bin/python -e ".[dev]"
 
 # model frameworks (heavy, install when needed):
