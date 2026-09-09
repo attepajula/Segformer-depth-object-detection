@@ -43,6 +43,17 @@ def cmd_run(args) -> int:
 
     seg = make_segmenter(args.backend)
     seg.load(args.checkpoint)
+
+    has_display = args.overlay or args.save
+    if has_display and not args.no_thread:
+        from segformer.runner import run_threaded
+
+        print(f"segformer run (threaded): backend={seg.name} endpoint={args.endpoint} "
+              f"overlay={args.overlay} save={args.save or '-'}")
+        run_threaded(args.endpoint, seg, show=args.overlay, save_dir=args.save,
+                     max_frames=args.max_frames)
+        return 0
+
     consumer = FrameConsumer(args.endpoint)
     meter = RateMeter()
     state = None
@@ -204,6 +215,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--overlay", action="store_true", help="OpenCV window")
     sp.add_argument("--save", default=None, metavar="DIR", help="write overlay PNGs")
     sp.add_argument("--max-frames", type=int, default=0)
+    sp.add_argument("--no-thread", action="store_true",
+                    help="serial loop (default: infer on a worker thread)")
     sp.set_defaults(func=cmd_run)
 
     sp = sub.add_parser("bench", parents=[common], help="per-frame latency / fps")

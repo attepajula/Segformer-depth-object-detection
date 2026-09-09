@@ -21,13 +21,15 @@ session1 (no door): 0 false positives.
 
 Precision comes from filtering, not the model (B0 is 37 mIoU):
 1. threshold door **probability** > 0.85 (not argmax) — `MlxSegmenter._PROB_THRESH`
-2. depth gate — `segformer/geometry.py` `door_gate()` (metric size / planar / vertical)
-3. temporal tracker — `segformer/tracking.py` (3 hits confirm, 6 linger)
+2. depth-consolidate B0's fragmented blobs — `geometry.consolidate_door()`
+3. depth gate on the consolidated region — `geometry.door_gate()` (size / planar / vertical)
+4. temporal tracker — `segformer/tracking.py` (3 hits confirm, 6 linger)
 
 All three were tuned against **one door**. Expect to re-tune constants once
 there's a real dataset:
 - `geometry.py`: `DOOR_W`, `DOOR_H_MIN/MAX`, `WALL_W`, `PLANE_INLIER`, `MAX_NORMAL_Y`
-- `mlx_backend.py`: `_PROB_THRESH`, `min_area`
+- `mlx_backend.py`: `_PROB_THRESH`, `min_area`, `_MIN_COMP`
+- `geometry.py` consolidation: `DEPTH_MERGE_TOL`, `MERGE_CLOSE_PX`
 - `tracking.py`: `min_hits`, `max_misses`, `iou_match`
 
 ## When recordings exist — next steps
@@ -42,8 +44,9 @@ there's a real dataset:
      MLX path to `segformer/model/convert.py` + a manifest entry.
    - or a depth-primary railing detector: thin repeated vertical structure at
      hand height, lots of depth-gradient / see-through gaps.
-5. If live fps matters: threaded consumer (infer thread + display thread) in
-   `segformer/consumer.py`. Currently ~22 fps headless, ~15-18 with overlay.
+5. Live fps: threaded run loop is in `segformer/runner.py` (infer worker +
+   main-thread display), ~26 fps effective. Model forward (~22 ms) is the
+   floor. For more: smaller input (384^2) or a bigger+quantised model.
 
 ## Gotchas
 

@@ -28,11 +28,16 @@ xtion capture ──ZMQ PUB (schema v1)──▶  segformer run
 - **Precision stack** (B0 is only 37 mIoU, so filtering does the work):
   1. threshold the door *probability* map at 0.85, not argmax — argmax eats the
      wall around the door;
-  2. depth gate (`geometry.py`) — back-project the mask, require a door-sized
+  2. depth-consolidate — B0 emits ~5 fragmented door blobs; merge the ones on
+     the same depth plane into one region (`geometry.consolidate_door`);
+  3. depth gate (`geometry.door_gate`) — back-project, require a door-sized
      (~0.4–1.9 m wide), planar, roughly vertical structure; tolerant of a door
-     only partly in frame;
-  3. temporal tracker (`tracking.py`) — 3 hits to confirm, lingers 6 frames;
+     only partly in frame — runs **once** on the consolidated region;
+  4. temporal tracker (`tracking.py`) — 3 hits to confirm, lingers 6 frames;
      kills the frame-to-frame flicker.
+- **Threaded run loop** (`runner.py`) — inference on a worker thread, `imshow`
+  on the main thread. Overlay + display hide behind the next inference instead
+  of adding to it. `run --no-thread` for the serial loop.
 
 ## Setup (Apple Silicon, native arm64)
 
@@ -96,10 +101,11 @@ then `segformer run --backend mlx --overlay`.
 | `model/convert.py` — HF safetensors → MLX artifact | done |
 | `backends/mlx_backend.py` | done — prob-threshold + depth gate + tracker |
 | `backends/torch_mps.py` | stub — secondary |
-| `geometry.py` — depth door gate | done, tuned on session2 (one real door) |
+| `geometry.py` — depth consolidate + door gate | done, tuned on session2 (one real door) |
 | `tracking.py` — temporal hysteresis | done |
+| `runner.py` — threaded run loop | done |
 | `bench` command | done |
-| perf: infer 42 ms / 24 fps (fp16, cv2 preprocess, model-res argmax/softmax) | ok |
+| perf: infer 29 ms no-door / 39 ms door; threaded loop ~26 fps effective | ok |
 
 ## Known limits
 
@@ -110,14 +116,17 @@ then `segformer run --backend mlx --overlay`.
   tether, door barely fits the frame). On a 250-frame segment with it in view:
   detected ~96% of frames, 2 on/off flips. session1 (no door): 0 false doors.
   Not validated on multiple doors / door types / open doors.
-- **Live fps ~15–18** (< the 24 fps bench): decode + overlay + `imshow`, and
-  `capture serve` sharing the machine under Rosetta. A threaded consumer would
-  decouple display from throughput.
+- **fps floor is the model** — ~22 ms forward for B0 at 512² on the GPU,
+  memory-bandwidth-bound (fp16 gives nothing). +5–7 ms preprocess + softmax,
+  +~10 ms depth path on door frames. The threaded loop hides decode/overlay/
+  imshow behind inference, so effective ~26 fps; `capture serve` (Rosetta)
+  sharing the machine still costs a few fps live.
 
 ## Next
 
 1. Railing: B0 barely sees railings (2 blobs in all of session2). Needs a
    bigger model or a depth-primary detector (thin repeated vertical structure).
-2. Threaded consumer (infer thread + display thread) if live fps matters.
-3. Bigger model via a torch `.bin` → MLX conversion path in the registry.
-4. Split door-from-wall when B0 does merge them (depth plane discontinuity).
+2. Bigger model via a torch `.bin` → MLX conversion path in the registry
+   (b1–b5 have no safetensors). Or a smaller model input (384²) for ~15 ms fwd.
+3. Split door-from-wall when B0 merges them beyond depth-consolidation
+   (a depth-plane discontinuity within the merged region).

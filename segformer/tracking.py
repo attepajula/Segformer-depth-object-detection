@@ -18,6 +18,10 @@ import numpy as np
 from segformer.segmenter import Instance, SegResult
 
 
+def _boxes_disjoint(p: tuple, q: tuple) -> bool:
+    return p[2] < q[0] or q[2] < p[0] or p[3] < q[1] or q[3] < p[1]
+
+
 def _iou(a: np.ndarray, b: np.ndarray) -> float:
     inter = np.count_nonzero(a & b)
     if inter == 0:
@@ -60,6 +64,8 @@ class Tracker:
             best, best_iou = -1, self.iou_match
             for i, d in enumerate(dets):
                 if i in used or d.label != tr.label:
+                    continue
+                if _boxes_disjoint(tr.box, d.box_xyxy):
                     continue
                 v = _iou(tr.mask, d.mask)
                 if v >= best_iou:

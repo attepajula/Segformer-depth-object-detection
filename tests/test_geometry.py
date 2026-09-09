@@ -53,3 +53,38 @@ def test_no_depth_falls_back_to_keep():
     pts, valid = backproject(depth, INTR)
     g = door_gate(_rect(280, 60, 360, 420), pts, valid, INTR)
     assert g.keep and g.reason in ("shallow-keep", "insufficient-depth")
+
+
+def test_consolidate_merges_same_depth_blobs():
+    import cv2
+
+    from segformer.geometry import consolidate_door
+
+    # two blobs, same depth plane -> one merged mask
+    binm = np.zeros((H, W), np.uint8)
+    binm[100:300, 250:330] = 1     # big
+    binm[120:180, 360:400] = 1     # small, to the side
+    nlab, lab, stats, _ = cv2.connectedComponentsWithStats(binm)
+    cand = [c for c in range(1, nlab) if stats[c, cv2.CC_STAT_AREA] >= 150]
+    assert len(cand) == 2
+    depth = _vertical_plane(2.0)
+    merged = consolidate_door(lab, cand, stats, depth)
+    # both components present in the merged mask
+    assert merged[110, 300] and merged[140, 380]
+
+
+def test_consolidate_drops_far_depth_blob():
+    import cv2
+
+    from segformer.geometry import consolidate_door
+
+    binm = np.zeros((H, W), np.uint8)
+    binm[100:300, 250:330] = 1
+    binm[120:200, 380:430] = 1
+    nlab, lab, stats, _ = cv2.connectedComponentsWithStats(binm)
+    cand = [c for c in range(1, nlab) if stats[c, cv2.CC_STAT_AREA] >= 150]
+    depth = np.full((H, W), 2000, np.uint16)
+    depth[:, 360:] = 5000          # second blob is 3 m further -> not the same door
+    merged = consolidate_door(lab, cand, stats, depth)
+    assert merged[110, 300]
+    assert not merged[150, 400]

@@ -31,6 +31,10 @@ PLANE_TOL = 0.06             # m
 PLANE_INLIER = 0.45
 MAX_NORMAL_Y = 0.55          # |n_y|: 0 vertical surface, 1 floor/ceiling
 
+DEPTH_MERGE_TOL = 0.35       # m — components within this of the anchor's median
+                            #     depth are the same door, merge before gating
+MERGE_CLOSE_PX = 9          # morphological close to bridge merged sub-blobs
+
 
 @dataclass
 class GateResult:
@@ -102,3 +106,35 @@ def door_gate(mask: np.ndarray, points: np.ndarray, valid: np.ndarray,
     elif g.normal_y > MAX_NORMAL_Y:
         g.keep, g.reason = False, "not-vertical"
     return g
+
+
+def consolidate_door(labels: np.ndarray, cand_ids: list[int], stats: np.ndarray,
+                     depth_mm: np.ndarray) -> np.ndarray:
+    """Merge B0's fragmented door blobs that sit at the same depth into one mask.
+
+    Different-sized blobs on the same depth plane are one door, not many —
+    gate the union, once. ``labels``/``stats`` from connectedComponentsWithStats.
+    """
+    import cv2
+
+    area = cv2.CC_STAT_AREA
+    anchor = max(cand_ids, key=lambda c: stats[c, area])
+    z = depth_mm.astype(np.float32) / 1000.0
+
+    def med_depth(cid: int) -> float:
+        zc = z[(labels == cid) & (depth_mm > 0)]
+        return float(np.median(zc)) if zc.size > 30 else float("nan")
+
+    z0 = med_depth(anchor)
+    merged = labels == anchor
+    if np.isfinite(z0):
+        for c in cand_ids:
+            if c == anchor:
+                continue
+            zc = med_depth(c)
+            if np.isfinite(zc) and abs(zc - z0) <= DEPTH_MERGE_TOL:
+                merged |= labels == c
+
+    k = np.ones((MERGE_CLOSE_PX, MERGE_CLOSE_PX), np.uint8)
+    merged = cv2.morphologyEx(merged.astype(np.uint8), cv2.MORPH_CLOSE, k).astype(bool)
+    return merged

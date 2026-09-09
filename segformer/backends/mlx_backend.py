@@ -21,6 +21,7 @@ from segformer.segmenter import Instance, SegResult, Segmenter
 _DOORLIKE = {14, 58}                       # door, screen door -> depth gate
 _PROB_THRESH = {14: 0.85, 58: 0.85}       # high: isolate the leaf from the wall
 _DEFAULT_PROB_THRESH = 0.45               # railing, bannister
+_MIN_COMP = 150                           # ignore components smaller than this (px)
 
 
 class MlxSegmenter(Segmenter):
@@ -56,48 +57,60 @@ class MlxSegmenter(Segmenter):
 
         target_ids = list(self.targets)
         prob = self._model.class_probs(frame.rgb, target_ids)     # (H,W,T)
-
-        points = valid = None
-        if self.use_depth:
-            from segformer.geometry import backproject
-
-            points, valid = backproject(frame.depth, frame.intrinsics)
-
         res = SegResult(frame_id=frame.frame_id, timestamp_ns=frame.timestamp_ns)
         next_id = 1
+        k3 = np.ones((3, 3), np.uint8)
+        _points = None  # backproject lazily, once, only if a door candidate exists
+
         for ti, ade_id in enumerate(target_ids):
             thresh = _PROB_THRESH.get(ade_id, _DEFAULT_PROB_THRESH)
-            cls_mask = (prob[:, :, ti] > thresh).astype(np.uint8)
-            if not cls_mask.any():
+            binm = (prob[:, :, ti] > thresh).astype(np.uint8)
+            if not binm.any():
                 continue
-            cls_mask = cv2.morphologyEx(cls_mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
-            n, comp = cv2.connectedComponents(cls_mask)
-            for c in range(1, n):
-                m = comp == c
-                if int(m.sum()) < self.min_area:
-                    continue
-                if self.use_depth and ade_id in _DOORLIKE:
-                    from segformer.geometry import door_gate
+            binm = cv2.morphologyEx(binm, cv2.MORPH_OPEN, k3)
+            nlab, lab, stats, _cent = cv2.connectedComponentsWithStats(binm)
+            cand = [c for c in range(1, nlab) if stats[c, cv2.CC_STAT_AREA] >= _MIN_COMP]
+            if not cand:
+                continue
+            pmap = prob[:, :, ti]
 
-                    g = door_gate(m, points, valid, frame.intrinsics)
-                    if not g.keep:
-                        continue
-                ys, xs = np.where(m)
-                res.instances.append(
-                    Instance(
-                        instance_id=next_id,
-                        label=ade_id,
-                        score=float(prob[m, ti].mean()),
-                        mask=m,
-                        box_xyxy=(float(xs.min()), float(ys.min()),
-                                  float(xs.max()), float(ys.max())),
-                    )
-                )
+            if self.use_depth and ade_id in _DOORLIKE:
+                from segformer.geometry import consolidate_door, door_gate
+
+                if _points is None:
+                    from segformer.geometry import backproject
+
+                    _points = backproject(frame.depth, frame.intrinsics)
+                points, valid = _points
+
+                merged = consolidate_door(lab, cand, stats, frame.depth)
+                if int(merged.sum()) < self.min_area:
+                    continue
+                if not door_gate(merged, points, valid, frame.intrinsics).keep:
+                    continue
+                res.instances.append(self._instance(next_id, ade_id, merged, pmap))
                 next_id += 1
+            else:
+                for c in cand:
+                    if stats[c, cv2.CC_STAT_AREA] < self.min_area:
+                        continue
+                    res.instances.append(self._instance(next_id, ade_id, lab == c, pmap))
+                    next_id += 1
 
         if self._tracker is not None:
             res = self._tracker.update(res)
         return res, state
+
+    @staticmethod
+    def _instance(iid: int, label: int, mask: np.ndarray, pmap: np.ndarray) -> Instance:
+        ys, xs = np.where(mask)
+        return Instance(
+            instance_id=iid,
+            label=label,
+            score=float(pmap[mask].mean()),
+            mask=mask,
+            box_xyxy=(float(xs.min()), float(ys.min()), float(xs.max()), float(ys.max())),
+        )
 
     def close(self) -> None:
         self._model = None
