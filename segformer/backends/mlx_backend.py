@@ -19,9 +19,9 @@ from segformer.segmenter import Instance, SegResult, Segmenter
 class MlxSegmenter(Segmenter):
     name = "mlx"
 
-    def __init__(self, size: str = "b0", min_area: int = 400,
+    def __init__(self, model: str | None = None, min_area: int = 400,
                  targets: dict[int, str] | None = None):
-        self.size = size
+        self.model_name = model            # registry name; None => models.toml default
         self.min_area = min_area
         self.targets = targets or ADE20K_TARGETS
         self._model = None
@@ -29,9 +29,9 @@ class MlxSegmenter(Segmenter):
     def load(self, checkpoint: str | None = None) -> None:
         if self._model is not None:
             return
-        from segformer.model import load_segformer
+        from segformer.model import load_model
 
-        self._model = load_segformer(self.size, weights_path=checkpoint)
+        self._model = load_model(self.model_name, checkpoint=checkpoint)
 
     def infer(self, frame: Frame, state: Any | None) -> tuple[SegResult, Any]:
         import cv2

@@ -11,7 +11,9 @@ dependencies = [
 
 [project.optional-dependencies]
 # Primary backend: SegFormer on MLX (Apple GPU). Pillow matches HF's resize.
-mlx = ["mlx>=0.32", "safetensors>=0.4", "huggingface-hub>=0.24", "pillow>=10"]
+# No huggingface_hub / safetensors: mx.load reads safetensors; the registry
+# downloads pinned weights with a plain HTTPS GET + sha256 check.
+mlx = ["mlx>=0.32", "pillow>=10"]
 # Secondary backend, not implemented.
 torch = ["torch>=2.4", "torchvision>=0.19"]
 # HF transformers reference for tools/compare_hf.py (CPU).

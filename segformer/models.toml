@@ -1,0 +1,30 @@
+# SegFormer model registry.
+#   segformer models list | pull | convert | verify | path | where
+#
+# Weights cache dir: $SEGFORMER_MODELS_DIR, else <repo>/weights/  (gitignored)
+# Each model gets  weights/<name>/{source.<ext>, model.mlx.safetensors, model.json}
+
+[defaults]
+model = "segformer-b0-ade"
+
+[models.segformer-b0-ade]
+description = "SegFormer-B0, ADE20K-150 semantic segmentation (NVIDIA)"
+arch        = "b0"          # -> segformer.model.config.CONFIGS
+input       = 512
+classes     = "ade20k-150"
+source      = "hf"
+repo        = "nvidia/segformer-b0-finetuned-ade-512-512"
+revision    = "489d5cd81a0b59fab9b7ea758d3548ebe99677da"
+file        = "model.safetensors"
+sha256      = "6ae39addd01de6b1b8bde2cf677d43a5cd733424b8d186de3f95d1c51fee23f9"
+size        = 15036944
+
+# A future fine-tune would look like:
+# [models.doors-v1]
+# description = "b0 fine-tuned: door / railing / background"
+# arch        = "b0"
+# input       = 512
+# classes     = "doors-railings-3"
+# source      = "local"
+# file        = "doors-v1.safetensors"     # drop it in weights/doors-v1/
+# parent      = "segformer-b0-ade"

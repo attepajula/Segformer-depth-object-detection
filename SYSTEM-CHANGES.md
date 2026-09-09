@@ -5,12 +5,14 @@ records anything outside the project directory.
 
 ## Outside the project
 
-### Hugging Face model cache
-- `~/.cache/huggingface/hub/` — SegFormer weights downloaded on first use:
-  `nvidia/segformer-b0-finetuned-ade-512-512` (~15 MB safetensors + config).
-  B2 (~110 MB) if used.
-- Additive cache, managed by `huggingface_hub`. Remove with
-  `huggingface-cli delete-cache` or `rm -rf ~/.cache/huggingface/hub/models--nvidia--segformer-*`.
+### Model weights
+- Live in the project: `weights/<name>/` (gitignored). The registry
+  (`segformer/models.toml`) downloads a pinned, sha256-checked safetensors with
+  a plain HTTPS GET and converts it to an MLX artifact — no `huggingface_hub`.
+- `~/.cache/huggingface/hub/` — only if `.[reference]` (torch + transformers,
+  for `tools/compare_hf.py`) was installed and run; `transformers` caches
+  weights there. The registry also *reuses* that cache if it exists, to avoid a
+  re-download. Remove with `rm -rf ~/.cache/huggingface/hub/models--nvidia--segformer-*`.
 
 ### Nothing else persistent
 - `.venv/` is project-local and gitignored. It carries `mlx`, `opencv`, and

@@ -41,8 +41,27 @@ uv pip install --python .venv/bin/python -e ".[reference]"
 .venv/bin/python tools/compare_hf.py --own-preproc    # model port only (bit-exact)
 ```
 
-Weights download automatically from `nvidia/segformer-b0-finetuned-ade-512-512`
-on first use (~15 MB), cached by `huggingface_hub`.
+## Model management
+
+Registry, manifest in `segformer/models.toml`. No `huggingface_hub` — the
+registry does one pinned HTTPS GET + sha256 check, then a one-time convert to an
+MLX-ready file. Runtime imports neither `transformers` nor `safetensors`.
+
+```sh
+PY=.venv/bin/python
+$PY -m segformer models list          # names, arch, classes, state (-|source|ready)
+$PY -m segformer models pull          # download the pinned source safetensors
+$PY -m segformer models convert       # + build weights/<name>/model.mlx.safetensors
+$PY -m segformer models verify        # re-hash source, load artifact
+$PY -m segformer models path          # print the artifact path
+$PY -m segformer models where         # print the cache dir
+```
+
+Files land in `weights/<name>/` (`source.safetensors`, `model.mlx.safetensors`,
+`model.json` provenance sidecar). Override the dir with `$SEGFORMER_MODELS_DIR`.
+`pull` reuses an existing `~/.cache/huggingface` download if present.
+`run`/`bench` auto-`convert` on first use. A fine-tune: add a `source = "local"`
+entry, drop its file in `weights/<name>/`, done.
 
 ## Usage
 
@@ -67,7 +86,8 @@ then `segformer run --backend mlx --overlay`.
 | `wire.py`, `frame.py` | done — schema-v1 decode |
 | `segmenter.py`, `consumer.py`, `overlay.py` | done |
 | `model/` — MiT encoder + decode head (MLX) | done, HF-validated bit-exact |
-| `model/weights.py` — HF safetensors → MLX | done (B0, B2) |
+| `model/registry.py` + `models.toml` | done — pinned, sha256, offline-first |
+| `model/convert.py` — HF safetensors → MLX artifact | done |
 | `backends/mlx_backend.py` | done — ADE targets → connected-component instances |
 | `backends/torch_mps.py` | stub — secondary |
 | `bench` command | done |

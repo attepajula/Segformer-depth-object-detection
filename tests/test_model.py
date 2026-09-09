@@ -5,15 +5,14 @@ import numpy as np
 import pytest
 
 mlx = pytest.importorskip("mlx.core")
-pytest.importorskip("safetensors")
 
 
 @pytest.fixture(scope="module")
 def model():
-    from segformer.model import load_segformer
+    from segformer.model import load_model
 
     try:
-        return load_segformer("b0")
+        return load_model("segformer-b0-ade")
     except Exception as e:  # network down, no cache
         pytest.skip(f"weights unavailable: {e}")
 

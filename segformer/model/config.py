@@ -39,7 +39,6 @@ class MiTConfig:
     mlp_ratio: int = 4
     decoder_hidden_size: int = 256
     num_classes: int = ADE20K_NUM_CLASSES
-    hf_repo: str = ""
 
 
 MIT_B0 = MiTConfig(
@@ -48,7 +47,6 @@ MIT_B0 = MiTConfig(
     depths=(2, 2, 2, 2),
     num_heads=(1, 2, 5, 8),
     decoder_hidden_size=256,
-    hf_repo="nvidia/segformer-b0-finetuned-ade-512-512",
 )
 
 MIT_B2 = MiTConfig(
@@ -57,7 +55,6 @@ MIT_B2 = MiTConfig(
     depths=(3, 4, 6, 3),
     num_heads=(1, 2, 5, 8),
     decoder_hidden_size=768,
-    hf_repo="nvidia/segformer-b2-finetuned-ade-512-512",
 )
 
 CONFIGS = {"b0": MIT_B0, "b2": MIT_B2}

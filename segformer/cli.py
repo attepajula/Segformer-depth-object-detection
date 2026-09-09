@@ -1,8 +1,9 @@
 """``segformer`` CLI.
 
-    segformer probe [--endpoint ...]                  decode one frame, print stats
-    segformer run   [--backend mlx] [--overlay|--save DIR] [--max-frames N]
-    segformer bench [--backend mlx] [--frames N]      per-frame latency / fps
+    segformer probe  [--endpoint ...]                 decode one frame, print stats
+    segformer run    [--backend mlx] [--overlay|--save DIR] [--max-frames N]
+    segformer bench  [--backend mlx] [--frames N]     per-frame latency / fps
+    segformer models list|pull|convert|verify|path|where
 """
 
 from __future__ import annotations
@@ -133,6 +134,59 @@ def cmd_bench(args) -> int:
     return 0
 
 
+def cmd_models(args) -> int:
+    from segformer.model import registry as reg
+
+    models = reg.manifest()
+
+    if args.models_cmd == "where":
+        print(reg.models_root())
+        return 0
+
+    if args.models_cmd == "list":
+        default = reg.default_model()
+        for name, spec in models.items():
+            art = reg.artifact_path(spec)
+            src = reg.source_path(spec)
+            state = "ready" if art.is_file() else ("source" if src.is_file() else "-")
+            mark = "*" if name == default else " "
+            print(f"{mark} {name:22s} {spec.arch:3s} {spec.classes:16s} "
+                  f"{spec.source:5s} [{state}]")
+        return 0
+
+    spec = reg.get(args.name)
+    if args.models_cmd == "path":
+        print(reg.artifact_path(spec))
+        return 0
+    if args.models_cmd == "pull":
+        p = reg.ensure_source(spec, quiet=False)
+        print(f"source: {p}  ({p.stat().st_size} bytes, sha256 ok)")
+        return 0
+    if args.models_cmd == "convert":
+        p = reg.ensure_artifact(spec, quiet=False)
+        print(f"artifact: {p}")
+        return 0
+    if args.models_cmd == "verify":
+        src = reg.source_path(spec)
+        if not src.is_file():
+            print(f"{spec.name}: source not downloaded (run: segformer models pull {spec.name})")
+            return 1
+        got = reg.sha256_file(src)
+        ok = (got == spec.sha256) if spec.sha256 else None
+        print(f"{spec.name}: source sha256 {got} "
+              f"{'OK' if ok else 'MISMATCH' if ok is False else '(no pin)'}")
+        art = reg.artifact_path(spec)
+        if art.is_file():
+            import mlx.core as mx
+
+            from segformer.model import load_model
+
+            load_model(spec.name)
+            print(f"  artifact loads OK ({len(mx.load(str(art)))} tensors)")
+        return 0 if ok is not False else 1
+    return 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--endpoint", default="tcp://127.0.0.1:5556")
@@ -156,6 +210,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--backend", default="mlx", choices=["mlx", "torch-mps", "dummy"])
     sp.add_argument("--frames", type=int, default=300)
     sp.set_defaults(func=cmd_bench)
+
+    sp = sub.add_parser("models", help="manage model weights (registry)")
+    msub = sp.add_subparsers(dest="models_cmd", required=True)
+    for c in ("list", "where"):
+        msub.add_parser(c)
+    for c in ("pull", "convert", "verify", "path"):
+        mp = msub.add_parser(c)
+        mp.add_argument("name", nargs="?", default=None, help="model name (default from models.toml)")
+    sp.set_defaults(func=cmd_models)
 
     return p
 

@@ -39,9 +39,9 @@ def main() -> int:
     # --- MLX port ---------------------------------------------------
     import mlx.core as mx
 
-    from segformer.model import load_segformer
+    from segformer.model import load_model
 
-    model = load_segformer(args.size)
+    model = load_model(f"segformer-{args.size}-ade")
     pre = model._preprocess(rgb)                    # (1,512,512,3) NHWC, our pipeline
     mlx_low = model(pre)
 
