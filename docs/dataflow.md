@@ -23,10 +23,11 @@ flowchart TB
         MASK["Turn likelihood into a shape<br/>keep pixels the model is sure are 'door'<br/>(not just its best guess)"]
         DEPTH["Check it against depth<br/>merge blobs at the same distance into one door,<br/>reject anything wall-sized, tilted, or not flat"]
         HOLD["Require it to persist<br/>a door must show up 3 frames running,<br/>and it lingers 6 frames after it's lost<br/>— stops the flicker"]
-        RECV --> UNPACK --> NET --> MASK --> DEPTH --> HOLD
+        RESULT["Detections for this frame<br/>per door/railing: stable id, class,<br/>confidence, pixel mask, box"]
+        RECV --> UNPACK --> NET --> MASK --> DEPTH --> HOLD --> RESULT
     end
 
-    HANDOFF{{"latest result<br/>handed across, newest-wins"}}
+    HANDOFF{{"newest (frame + detections)<br/>one slot, overwritten each frame"}}
 
     subgraph DRAW["Display thread"]
         direction TB
@@ -35,8 +36,11 @@ flowchart TB
         OVER --> SHOW
     end
 
+    NAV(["downstream consumer — NOT BUILT<br/>detections + depth + lens →<br/>door plane in metres, for navigation"])
+
     IN ==> RECV
-    HOLD --> HANDOFF --> OVER
+    RESULT --> HANDOFF --> OVER
+    HANDOFF -.-> NAV
     SHOW -.->|"while this draws frame N,<br/>the network thread is already on N+1"| RECV
 ```
 
@@ -47,9 +51,15 @@ flowchart TB
   in that gap instead of adding to each frame. Effective rate ~26 fps;
   `--no-thread` runs it all in one thread if you want.
 
+- **The overlay is a debug view, not the output.** The product is the
+  per-frame detection list (`SegResult`: for each door/railing — a stable id,
+  the ADE20K class, a confidence, a pixel mask, a box). The overlay just draws
+  it for a human. A real consumer (navigation, not built) would take that list
+  plus the frame's depth and lens parameters and back-project the door into
+  metres.
 - **The model is weak on its own** (small, general-purpose). Precision comes
   from the depth check and the persistence rule, not the network.
-- **No shared code with capture.** This service has its own copy of the message
-  format; a version mismatch is rejected, never misread.
+- **No shared code with the camera side.** `stream/` carries its own copy of
+  the frame contract; a version mismatch is rejected, never misread.
 
 Stage-by-stage detail and tuning knobs: [`../HANDOFF.md`](../HANDOFF.md).

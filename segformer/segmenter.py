@@ -24,10 +24,10 @@ from stream.frame import Frame
 
 @dataclass
 class Instance:
-    """One segmented region in one frame (a connected component of a class)."""
+    """One detected door/railing/... in one frame."""
 
-    instance_id: int          # unique within the frame
-    label: int                # ADE20K class id (see model.config.ADE20K_TARGETS)
+    instance_id: int          # stable across frames while the object stays in view (tracker)
+    label: int                # ADE20K class id (see segformer.labels.ADE20K_TARGETS)
     score: float              # mean class probability over the mask, [0, 1]
     mask: np.ndarray          # (H, W) bool
     box_xyxy: tuple[float, float, float, float]
