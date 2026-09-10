@@ -33,7 +33,7 @@ def test_logits_shape(model):
 
 def test_mlx_backend_returns_target_instances(model):
     from segformer.backends import make_segmenter
-    from segformer.frame import Frame, Intrinsics
+    from stream.frame import Frame, Intrinsics
     from segformer.model.config import ADE20K_TARGETS
 
     z = None

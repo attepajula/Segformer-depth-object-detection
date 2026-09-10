@@ -4,22 +4,13 @@ from __future__ import annotations
 
 import numpy as np
 
-from segformer.frame import Frame
-from segformer.model.config import ADE20K_TARGETS
+from stream.frame import Frame
+from segformer.labels import ADE20K_TARGETS, CLASS_COLOR, CLASS_COLOR_DEFAULT
 from segformer.segmenter import SegResult
-
-# fixed color per ADE20K class we surface (RGB)
-_CLASS_COLOR = {
-    14: (255, 130, 0),    # door — orange
-    38: (60, 220, 60),    # railing — green
-    95: (255, 235, 0),    # bannister — yellow
-    58: (230, 60, 230),   # screen door — magenta
-}
-_DEFAULT = (0, 180, 255)
 
 
 def _color(label: int) -> np.ndarray:
-    return np.array(_CLASS_COLOR.get(label, _DEFAULT), dtype=np.uint8)
+    return np.array(CLASS_COLOR.get(label, CLASS_COLOR_DEFAULT), dtype=np.uint8)
 
 
 def render(frame: Frame, result: SegResult, *, alpha: float = 0.45, fps: float | None = None) -> np.ndarray:

@@ -12,6 +12,10 @@ __pycache__/
 checkpoints/
 weights/
 
+# recorded sessions (GB-scale, transferred out of band — docs/recording-format.md)
+sessions/
+session*/
+
 # inference dumps
 out/
 *.mp4

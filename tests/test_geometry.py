@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from segformer.frame import Intrinsics
+from stream.frame import Intrinsics
 from segformer.geometry import backproject, door_gate
 
 INTR = Intrinsics(570.0, 570.0, 320.0, 240.0, 640, 480)

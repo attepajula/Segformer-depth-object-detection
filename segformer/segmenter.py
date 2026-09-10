@@ -1,7 +1,7 @@
 """Framework-agnostic segmentation interface.
 
 Everything downstream (CLI, overlay, eval) talks to :class:`Segmenter` and
-:class:`SegResult` only. Backends (MLX, torch-mps, dummy) are drop-in
+:class:`SegResult` only. Backends (mlx, torch, dummy) are drop-in
 interchangeable — pick at construction time via
 ``segformer.backends.make_segmenter``.
 
@@ -19,7 +19,7 @@ from typing import Any
 
 import numpy as np
 
-from segformer.frame import Frame
+from stream.frame import Frame
 
 
 @dataclass
@@ -55,7 +55,7 @@ class Segmenter(ABC):
     stream discontinuity (replay loop, camera reopen).
     """
 
-    #: short backend name, e.g. "mlx", "torch-mps", "dummy"
+    #: short backend name, e.g. "mlx", "torch", "dummy"
     name: str = "abstract"
 
     @abstractmethod

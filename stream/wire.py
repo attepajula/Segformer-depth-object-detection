@@ -1,10 +1,11 @@
-"""Decode schema-v1 frames off the ZeroMQ wire.
+"""Encode/decode schema-v1 frames on the ZeroMQ wire.
 
-Wire format (see the capture pipeline's docs/wire-format.md): one single-part
-msgpack map per frame, pixel arrays as ``{dtype, shape, data}`` sub-maps with
-raw C-contiguous buffers, optionally lz4-compressed.
+Wire format (see docs/recording-format.md): one single-part msgpack map per
+frame, pixel arrays as ``{dtype, shape, data}`` sub-maps with raw C-contiguous
+buffers, optionally lz4-compressed.
 
-Decode only — this process never publishes.
+``segformer run`` only decodes; ``segformer replay`` uses ``encode_frame`` to
+publish recorded sessions.
 """
 
 from __future__ import annotations
@@ -12,8 +13,8 @@ from __future__ import annotations
 import msgpack
 import numpy as np
 
-from segformer import WIRE_SCHEMA_VERSION
-from segformer.frame import Frame, Intrinsics
+from stream.frame import WIRE_SCHEMA_VERSION
+from stream.frame import Frame, Intrinsics
 
 try:
     import lz4.block as _lz4
@@ -23,6 +24,29 @@ except Exception:  # optional
 
 class WireError(RuntimeError):
     pass
+
+
+def _pack_array(a: np.ndarray, compression: str) -> dict:
+    a = np.ascontiguousarray(a)
+    raw = a.tobytes()
+    if compression == "lz4":
+        if _lz4 is None:
+            raise WireError("lz4 requested but python-lz4 is not installed")
+        raw = _lz4.compress(raw, store_size=True)
+    elif compression != "none":
+        raise WireError(f"unknown compression {compression!r}")
+    return {"dtype": str(a.dtype), "shape": list(a.shape), "data": raw}
+
+
+def encode_frame(header: dict, rgb: np.ndarray, depth: np.ndarray,
+                 compression: str = "none") -> bytes:
+    """header: the schema-v1 contract fields (schema_version, frame_id,
+    timestamp_ns, depth_scale, registered, device, intrinsics)."""
+    msg = dict(header)
+    msg["compression"] = compression
+    msg["rgb"] = _pack_array(rgb, compression)
+    msg["depth"] = _pack_array(depth, compression)
+    return msgpack.packb(msg, use_bin_type=True)
 
 
 def _unpack_array(d: dict, compression: str) -> np.ndarray:

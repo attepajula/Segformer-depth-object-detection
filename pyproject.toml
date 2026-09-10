@@ -7,6 +7,7 @@ dependencies = [
     "numpy>=1.24",
     "pyzmq>=25",
     "msgpack>=1.0",
+    "lz4>=4.0",        # optional-on-the-wire, but cheap and 'replay --compress' wants it
 ]
 
 [project.optional-dependencies]
@@ -14,10 +15,10 @@ dependencies = [
 # No huggingface_hub / safetensors: mx.load reads safetensors; the registry
 # downloads pinned weights with a plain HTTPS GET + sha256 check.
 mlx = ["mlx>=0.32", "pillow>=10"]
-# Secondary backend, not implemented.
-torch = ["torch>=2.4", "torchvision>=0.19"]
-# HF transformers reference for tools/compare_hf.py (CPU).
-reference = ["torch>=2.4", "torchvision>=0.19", "transformers>=4.40", "pillow>=10"]
+# Alternate backend: SegFormer via HF transformers on Apple MPS or CPU.
+# For a machine without MLX. Also covers tools/compare_hf.py.
+torch = ["torch>=2.4", "torchvision>=0.19", "transformers>=4.40", "pillow>=10"]
+reference = ["segformer[torch]"]
 viewer = ["opencv-python>=4.8"]
 dev = ["pytest>=7", "opencv-python>=4.8"]
 
@@ -29,7 +30,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["segformer"]
+packages = ["segformer", "stream"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

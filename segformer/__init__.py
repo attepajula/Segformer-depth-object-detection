@@ -1,13 +1,11 @@
-"""segformer — door / railing semantic segmentation over the xtion RGB-D stream.
+"""segformer — door / railing semantic segmentation.
 
-Consumes the device-agnostic frame contract (schema v1) from the ``xtion``
-capture pipeline over ZeroMQ. Model: SegFormer (MiT encoder + all-MLP head),
-ADE20K-pretrained, ported to MLX. Behind a framework-agnostic
-:class:`~segformer.segmenter.Segmenter` interface.
+Consumes an RGB-D frame stream (the ``stream`` package: contract, codec,
+recording, replay, subscribe) and runs SegFormer (MiT encoder + all-MLP head,
+ADE20K-pretrained) behind a framework-agnostic
+:class:`~segformer.segmenter.Segmenter` interface — MLX or PyTorch backend.
 
 Not SeqFormer (video instance segmentation) — different model, one letter off.
 """
 
 __version__ = "0.0.1"
-
-WIRE_SCHEMA_VERSION = 1  # frame contract version this consumer understands

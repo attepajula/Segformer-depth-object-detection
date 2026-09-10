@@ -1,19 +1,34 @@
-"""SegFormer semantic segmentation model (MLX).
+"""SegFormer semantic segmentation model.
 
-  load_model()          -> SegFormer   (resolves via the registry, models.toml)
-  model.segment(rgb)    -> (H, W) int32 ADE20K label map
-  model.logits(rgb)     -> (H, W, 150) float logits
+  load_model()          -> a model    (resolves via the registry, models.toml)
+  model.class_probs(rgb, ids) -> (H, W, len(ids)) float32 probability maps
 
-Model files live under ``weights/<name>/`` (or ``$SEGFORMER_MODELS_DIR``);
-manage them with ``segformer models …``.
+Lazy: importing this package (or ``segformer.model.config`` /
+``segformer.model.registry``) does NOT import a model runtime. ``load_model``,
+``SegFormer``, ``CONFIGS`` pull in mlx only when first accessed.
 """
 
-from segformer.model.config import ADE20K_TARGETS, CONFIGS, MiTConfig
-from segformer.model.registry import ModelSpec, manifest, resolve
-from segformer.model.segformer import SegFormer
-from segformer.model.weights import load_model
+from __future__ import annotations
 
-__all__ = [
-    "ADE20K_TARGETS", "CONFIGS", "MiTConfig", "ModelSpec",
-    "SegFormer", "load_model", "manifest", "resolve",
-]
+_LAZY = {
+    "load_model": ("segformer.model.weights", "load_model"),
+    "SegFormer": ("segformer.model.segformer", "SegFormer"),
+    "CONFIGS": ("segformer.model.config", "CONFIGS"),
+    "MiTConfig": ("segformer.model.config", "MiTConfig"),
+    "ADE20K_TARGETS": ("segformer.labels", "ADE20K_TARGETS"),
+    "ModelSpec": ("segformer.model.registry", "ModelSpec"),
+    "manifest": ("segformer.model.registry", "manifest"),
+    "resolve": ("segformer.model.registry", "resolve"),
+}
+
+__all__ = list(_LAZY)
+
+
+def __getattr__(name: str):
+    try:
+        mod_name, attr = _LAZY[name]
+    except KeyError:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
+    import importlib
+
+    return getattr(importlib.import_module(mod_name), attr)

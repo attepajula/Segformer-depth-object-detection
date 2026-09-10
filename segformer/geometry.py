@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from segformer.frame import Intrinsics
+from stream.frame import Intrinsics
 
 # The mask reaching here is a high-probability door core (wall fringe already
 # dropped by the prob threshold), and the door is often only partly in frame

@@ -10,7 +10,7 @@ from typing import Any
 
 import numpy as np
 
-from segformer.frame import Frame
+from stream.frame import Frame
 from segformer.segmenter import Instance, SegResult, Segmenter
 
 

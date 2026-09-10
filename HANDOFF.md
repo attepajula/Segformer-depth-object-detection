@@ -48,9 +48,27 @@ there's a real dataset:
    main-thread display), ~26 fps effective. Model forward (~22 ms) is the
    floor. For more: smaller input (384^2) or a bigger+quantised model.
 
+## Backends
+
+- `--backend mlx | torch | dummy`, else `$SEGFORMER_BACKEND`, else `mlx`.
+- **mlx** — Apple GPU, the hand-port, `.[mlx]`. **torch** — HF transformers on
+  CUDA / MPS / CPU, `.[torch]`, for a machine without MLX. Both feed the same
+  `backends/postprocess.py` (threshold → components → depth gate → tracker);
+  they differ only in producing the probability maps. ~equal speed on this Mac
+  (mlx 27 fps, torch-MPS 26 fps).
+- `segformer/labels.py` is framework-free; `segformer/model/__init__.py` is
+  lazy — a `.[torch]`-only install never imports mlx.
+
+## Working from recordings
+
+`segformer replay <session>/ --loop` publishes a recorded session on ZMQ — a
+collaborator needs only this repo (`.[torch,viewer,dev]`) + the session files,
+no `xtion` checkout / OpenNI2 / Rosetta. `stream/replay.py` + `stream.wire.encode_frame`.
+Recordings are GB-scale, not in git — transfer out of band.
+
 ## Gotchas
 
 - xtion capture MUST run on the x86_64 venv (`xtion/.venv`). arm64 = no libOpenNI2.
-- segformer venv is arm64 (`segformer/.venv`), system python3.14.
-- `tools/compare_hf.py` needs `.[reference]` (torch+transformers, CPU) — parity check only.
+- segformer venv: `.[mlx]` on Apple Silicon, `.[torch]` elsewhere. Both + `viewer,dev`.
+- `tools/compare_hf.py` needs `.[torch]` — MLX-vs-HF parity check only.
 - recordings are ~44 MB/s uncompressed; session2 is 2.5 GB. gitignored.

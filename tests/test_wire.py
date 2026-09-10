@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from segformer.backends import make_segmenter
-from segformer.wire import WireError, decode_frame, decode_header
+from stream.wire import WireError, decode_frame, decode_header
 
 
 def _encode(rgb, depth, *, frame_id=1, device="fake", registered=True, schema_version=1):

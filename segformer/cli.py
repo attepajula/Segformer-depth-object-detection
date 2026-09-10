@@ -1,9 +1,13 @@
 """``segformer`` CLI.
 
+    segformer replay <session>  [--fast] [--loop] [--info]   publish a recording
     segformer probe  [--endpoint ...]                 decode one frame, print stats
-    segformer run    [--backend mlx] [--overlay|--save DIR] [--max-frames N]
-    segformer bench  [--backend mlx] [--frames N]     per-frame latency / fps
+    segformer run    [--backend ...] [--overlay | --save DIR] [--max-frames N]
+    segformer bench  [--backend ...] [--frames N]     per-frame latency / fps
     segformer models list|pull|convert|verify|path|where
+
+Backend is mlx | torch | dummy — from --backend, else $SEGFORMER_BACKEND,
+else mlx.
 """
 
 from __future__ import annotations
@@ -15,7 +19,7 @@ import sys
 def cmd_probe(args) -> int:
     import zmq
 
-    from segformer.wire import decode_frame
+    from stream.wire import decode_frame
 
     ctx = zmq.Context.instance()
     sock = ctx.socket(zmq.SUB)
@@ -38,7 +42,7 @@ def cmd_probe(args) -> int:
 
 def cmd_run(args) -> int:
     from segformer.backends import make_segmenter
-    from segformer.consumer import FrameConsumer, RateMeter
+    from stream.consumer import FrameConsumer, RateMeter
     from segformer import overlay
 
     seg = make_segmenter(args.backend)
@@ -112,7 +116,7 @@ def cmd_bench(args) -> int:
     import time
 
     from segformer.backends import make_segmenter
-    from segformer.consumer import FrameConsumer
+    from stream.consumer import FrameConsumer
 
     seg = make_segmenter(args.backend)
     t = time.time()
@@ -143,6 +147,15 @@ def cmd_bench(args) -> int:
           f"({n / sum(d):.1f} fps)  p50 {1000 * d[n // 2]:.1f}  "
           f"p90 {1000 * d[int(n * 0.9)]:.1f}  max {1000 * d[-1]:.1f}")
     return 0
+
+
+def cmd_replay(args) -> int:
+    from stream import replay
+
+    if args.info:
+        return replay.info(args.session)
+    return replay.publish(args.session, args.endpoint, fast=args.fast, loop=args.loop,
+                          compression="lz4" if args.compress else "none")
 
 
 def cmd_models(args) -> int:
@@ -188,12 +201,15 @@ def cmd_models(args) -> int:
               f"{'OK' if ok else 'MISMATCH' if ok is False else '(no pin)'}")
         art = reg.artifact_path(spec)
         if art.is_file():
-            import mlx.core as mx
+            try:
+                import mlx.core as mx
 
-            from segformer.model import load_model
+                from segformer.model import load_model
 
-            load_model(spec.name)
-            print(f"  artifact loads OK ({len(mx.load(str(art)))} tensors)")
+                load_model(spec.name)
+                print(f"  artifact loads OK ({len(mx.load(str(art)))} tensors)")
+            except ImportError:
+                print("  (mlx not installed — skipping artifact load check)")
         return 0 if ok is not False else 1
     return 2
 
@@ -210,7 +226,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_probe)
 
     sp = sub.add_parser("run", parents=[common], help="consume + segment + overlay")
-    sp.add_argument("--backend", default="mlx", choices=["mlx", "torch-mps", "dummy"])
+    sp.add_argument("--backend", default=None, choices=["mlx", "torch", "torch-mps", "dummy"],
+                    help="default: $SEGFORMER_BACKEND, else mlx")
     sp.add_argument("--checkpoint", default=None)
     sp.add_argument("--overlay", action="store_true", help="OpenCV window")
     sp.add_argument("--save", default=None, metavar="DIR", help="write overlay PNGs")
@@ -220,9 +237,19 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_run)
 
     sp = sub.add_parser("bench", parents=[common], help="per-frame latency / fps")
-    sp.add_argument("--backend", default="mlx", choices=["mlx", "torch-mps", "dummy"])
+    sp.add_argument("--backend", default=None, choices=["mlx", "torch", "torch-mps", "dummy"],
+                    help="default: $SEGFORMER_BACKEND, else mlx")
     sp.add_argument("--frames", type=int, default=300)
     sp.set_defaults(func=cmd_bench)
+
+    sp = sub.add_parser("replay", parents=[common],
+                        help="publish a recorded session on ZMQ (no camera needed)")
+    sp.add_argument("session", help="session folder (meta.json + chunk_*.npz)")
+    sp.add_argument("--fast", action="store_true", help="ignore recorded timing, go flat out")
+    sp.add_argument("--loop", action="store_true", help="restart at the end")
+    sp.add_argument("--compress", action="store_true", help="lz4-compress arrays on the wire")
+    sp.add_argument("--info", action="store_true", help="print recording stats and exit")
+    sp.set_defaults(func=cmd_replay)
 
     sp = sub.add_parser("models", help="manage model weights (registry)")
     msub = sp.add_subparsers(dest="models_cmd", required=True)

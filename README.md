@@ -1,30 +1,51 @@
 # segformer
 
 Semantic segmentation of **doors and railings** in the RGB-D stream from the
-[`xtion`](../xtion) capture pipeline. **MLX** (Apple GPU, native arm64).
+[`xtion`](../xtion) capture pipeline. **MLX** on Apple Silicon, or **PyTorch**
+(CUDA / MPS / CPU) on any other machine.
 
 Model: **SegFormer** (Xie et al., NeurIPS 2021) — MiT transformer encoder +
 all-MLP decode head. Pretrained on **ADE20K**, which already has `door`,
 `railing`, `bannister`, `screen door` as classes — no training. Ported to MLX
 and validated bit-exact against HF `transformers` (`tools/compare_hf.py`).
 
-> Not *SeqFormer* (video instance segmentation). One letter apart. Doors and
-> railings are static structure — semantic segmentation, not instance tracking.
+
 
 ## Pipeline
 
 ```
-xtion capture ──ZMQ PUB (schema v1)──▶  segformer run
-                tcp://127.0.0.1:5556      wire.decode ─▶ MlxSegmenter ─▶ overlay
-                                          SegFormer-B0, ADE20K → door/railing masks
-                                          → depth gate (geometry.py)
+ ┌─ xtion  capture serve  (live camera; macOS + Xtion + OpenNI2/Rosetta)
+ ├─ xtion  capture replay <session>          ──┐
+ └─ segformer  replay <session>  (this repo) ──┤  same schema-v1 ZMQ stream
+                                               ▼
+                              segformer run  ─▶ wire.decode ─▶ segmenter ─▶ overlay
+                              tcp://127.0.0.1:5556  SegFormer-B0, ADE20K
+                              (mlx | torch backend) → door/railing masks → depth gate
 ```
 
-- **No coupling to the capture repo** — `segformer/wire.py` + `frame.py` are an
-  independent copy of the schema-v1 contract, guarded by `WIRE_SCHEMA_VERSION`.
+### `stream/` vs the `xtion` repo — pick one producer
+
+Both implement the **same schema-v1 frame stream**; they don't run together.
+
+| | `xtion` repo (`capture/`) | this repo (`stream/`) |
+|---|---|---|
+| needs | the Xtion camera, OpenNI2, macOS x86_64 / Rosetta | nothing — `numpy / pyzmq / msgpack` |
+| does | record sessions, `capture serve` (live), `capture replay` | `segformer replay` (play a recording) |
+| use when | you have the camera on the Mac | you only have recordings (a collaborator) |
+
+The two `replay`s are equivalent — a recording published by either is byte-identical on the wire. `stream/` is a deliberate, standalone copy of the frozen contract (`WIRE_SCHEMA_VERSION`), so a collaborator never clones `xtion`. If the schema ever bumps, both copies change together.
+
+- **`stream/` — the frame stream, separate from the net.** Contract
+  (`stream/frame.py`), codec (`stream/wire.py`), recording format
+  (`stream/recording.py`), replay (`stream/replay.py`), subscribe
+  (`stream/consumer.py`). Imports nothing from `segformer`. See below on how it
+  relates to the `xtion` repo.
 - **Framework-agnostic** — everything talks to `segformer.segmenter.Segmenter` /
-  `SegResult`. Backends: `mlx` (primary), `torch-mps` (secondary, stub),
-  `dummy` (no model).
+  `SegResult`. Backends: `mlx` (Apple GPU, primary), `torch` (HF transformers on
+  CUDA / MPS / CPU — for a machine without MLX), `dummy` (no model). Same
+  probability→mask→depth-gate→tracker pipeline after the network
+  (`backends/postprocess.py`); the backends differ only in producing the
+  probability maps. Pick with `--backend`, `$SEGFORMER_BACKEND`, else `mlx`.
 - **Precision stack** (B0 is only 37 mIoU, so filtering does the work):
   1. threshold the door *probability* map at 0.85, not argmax — argmax eats the
      wall around the door;
@@ -39,17 +60,27 @@ xtion capture ──ZMQ PUB (schema v1)──▶  segformer run
   on the main thread. Overlay + display hide behind the next inference instead
   of adding to it. `run --no-thread` for the serial loop.
 
-## Setup (Apple Silicon, native arm64)
+## Setup
 
 ```sh
 uv venv --python python3.14 .venv
-uv pip install --python .venv/bin/python -e ".[mlx,viewer,dev]"
-.venv/bin/python -m pytest -q
 
-# optional: HF-parity check (installs torch + transformers, CPU)
-uv pip install --python .venv/bin/python -e ".[reference]"
+# Apple Silicon (MLX backend):
+uv pip install --python .venv/bin/python -e ".[mlx,viewer,dev]"
+
+# no MLX (torch backend — CUDA / MPS / CPU):
+uv pip install --python .venv/bin/python -e ".[torch,viewer,dev]"
+#   then either export SEGFORMER_BACKEND=torch  or pass --backend torch
+#   NVIDIA: install the CUDA torch wheel first, else it falls back to CPU:
+#   uv pip install --python .venv/bin/python torch --index-url https://download.pytorch.org/whl/cu124
+
+.venv/bin/python -m pytest -q
+```
+
+The `[torch]` extra also powers the HF-parity check:
+```sh
 .venv/bin/python tools/compare_hf.py                  # full pipeline
-.venv/bin/python tools/compare_hf.py --own-preproc    # model port only (bit-exact)
+.venv/bin/python tools/compare_hf.py --own-preproc    # MLX port vs HF, bit-exact
 ```
 
 ## Model management
@@ -84,23 +115,33 @@ $PY -m segformer run --backend mlx --save out/  # headless, PNG per frame
 $PY -m segformer bench --backend mlx            # fps
 ```
 
-Test rig (no camera):
+### Working from recordings (no camera, no xtion repo)
+
+`segformer replay` publishes a recorded session on ZeroMQ — indistinguishable
+from a live camera to `segformer run`. This is all the capture side a
+collaborator needs; no OpenNI2, no Rosetta, no `xtion` checkout.
+
 ```sh
-xtion/.venv/bin/python -m capture replay xtion/session1/ --publish --loop
+segformer replay session2/ --info            # frames, duration, size on disk
+segformer replay session2/ --loop            # terminal 1: publish (original timing)
+segformer run --backend torch --overlay      # terminal 2: consume + segment
 ```
-then `segformer run --backend mlx --overlay`.
+
+Recordings are large (GB/minute) and not in git — move them out of band. Format
++ details: [`docs/recording-format.md`](docs/recording-format.md).
 
 ## Status
 
 | part | state |
 |---|---|
-| `wire.py`, `frame.py` | done — schema-v1 decode |
-| `segmenter.py`, `consumer.py`, `overlay.py` | done |
+| `stream/` — frame contract, codec, recording, replay, subscribe | done — independent of the net |
+| `segmenter.py`, `overlay.py` | done |
 | `model/` — MiT encoder + decode head (MLX) | done, HF-validated bit-exact |
 | `model/registry.py` + `models.toml` | done — pinned, sha256, offline-first |
 | `model/convert.py` — HF safetensors → MLX artifact | done |
-| `backends/mlx_backend.py` | done — prob-threshold + depth gate + tracker |
-| `backends/torch_mps.py` | stub — secondary |
+| `backends/postprocess.py` | done — shared prob→mask→gate→tracker pipeline |
+| `backends/mlx_backend.py` | done — MLX SegFormer → probability maps |
+| `backends/torch_backend.py` | done — HF transformers on CUDA / MPS / CPU → probability maps |
 | `geometry.py` — depth consolidate + door gate | done, tuned on session2 (one real door) |
 | `tracking.py` — temporal hysteresis | done |
 | `runner.py` — threaded run loop | done |

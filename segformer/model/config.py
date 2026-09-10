@@ -11,20 +11,21 @@ background. No training — the pretrained weights already know these classes.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-# ADE20K label id -> name, for the structure classes we surface.
-ADE20K_TARGETS: dict[int, str] = {
-    14: "door",
-    38: "railing",
-    95: "bannister",
-    58: "screen door",
-}
+# re-exported for existing imports; the source of truth is segformer.labels
+# (framework-free).
+from segformer.labels import (
+    ADE20K_NUM_CLASSES,
+    ADE20K_TARGETS,
+    IMAGENET_MEAN,
+    IMAGENET_STD,
+)
 
-ADE20K_NUM_CLASSES = 150
-
-IMAGENET_MEAN = (0.485, 0.456, 0.406)
-IMAGENET_STD = (0.229, 0.224, 0.225)
+__all__ = [
+    "ADE20K_NUM_CLASSES", "ADE20K_TARGETS", "IMAGENET_MEAN", "IMAGENET_STD",
+    "MiTConfig", "CONFIGS", "MIT_B0", "MIT_B2",
+]
 
 
 @dataclass(frozen=True)

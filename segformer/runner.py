@@ -15,7 +15,7 @@ from __future__ import annotations
 import threading
 
 from segformer import overlay
-from segformer.consumer import DEFAULT_ENDPOINT, FrameConsumer, RateMeter
+from stream.consumer import DEFAULT_ENDPOINT, FrameConsumer, RateMeter
 
 
 class _Latest:

@@ -1,8 +1,8 @@
-"""Decoded frame — the consumer-side view of the capture pipeline's contract.
+"""The RGB-D frame contract.
 
-Mirrors ``capture/frame.py`` schema v1. Kept as an independent copy on purpose:
-segformer must not import the capture package. If the wire schema bumps, update
-``WIRE_SCHEMA_VERSION`` and this file together.
+Mirrors the capture service's schema v1 (`../xtion`, `capture/frame.py`) — a
+deliberately separate copy of a frozen format. If the schema ever bumps, this
+file, ``wire.py`` and ``WIRE_SCHEMA_VERSION`` change together.
 """
 
 from __future__ import annotations
@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+
+WIRE_SCHEMA_VERSION = 1  # bump only on an incompatible frame/recording change
 
 
 @dataclass(frozen=True)
