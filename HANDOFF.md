@@ -19,17 +19,22 @@ Two repos, `../xtion` (capture) and this one (segmentation). Both committed clea
 session2 (one real door): ~96% detection when in view, flicker gone.
 session1 (no door): 0 false positives.
 
+Multi-door has not been exercised against real footage yet — `cluster_doors`
+now emits one mask per depth-separated blob group instead of collapsing
+everything onto the single biggest blob (the old one-door-per-frame cap), but
+it's only been checked on synthetic depth in `tests/test_geometry.py`.
+
 Precision comes from filtering, not the model (B0 is 37 mIoU):
 1. threshold door **probability** > 0.85 (not argmax) — `MlxSegmenter._PROB_THRESH`
-2. depth-consolidate B0's fragmented blobs — `geometry.consolidate_door()`
-3. depth gate on the consolidated region — `geometry.door_gate()` (size / planar / vertical)
+2. depth-cluster B0's fragmented blobs into one mask per door — `geometry.cluster_doors()`
+3. depth gate each clustered door — `geometry.door_gate()` (size / planar / vertical)
 4. temporal tracker — `segformer/tracking.py` (3 hits confirm, 6 linger)
 
 All three were tuned against **one door**. Expect to re-tune constants once
 there's a real dataset:
 - `geometry.py`: `DOOR_W`, `DOOR_H_MIN/MAX`, `WALL_W`, `PLANE_INLIER`, `MAX_NORMAL_Y`
 - `mlx_backend.py`: `_PROB_THRESH`, `min_area`, `_MIN_COMP`
-- `geometry.py` consolidation: `DEPTH_MERGE_TOL`, `MERGE_CLOSE_PX`
+- `geometry.py` clustering: `DEPTH_MERGE_TOL`, `MERGE_CLOSE_PX`
 - `tracking.py`: `min_hits`, `max_misses`, `iou_match`
 
 ## When recordings exist — next steps

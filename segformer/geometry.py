@@ -109,33 +109,50 @@ def door_gate(mask: np.ndarray, points: np.ndarray, valid: np.ndarray,
     return g
 
 
-def consolidate_door(labels: np.ndarray, cand_ids: list[int], stats: np.ndarray,
-                     depth_mm: np.ndarray) -> np.ndarray:
-    """Merge B0's fragmented door blobs that sit at the same depth into one mask.
+def cluster_doors(labels: np.ndarray, cand_ids: list[int], stats: np.ndarray,
+                  depth_mm: np.ndarray) -> list[np.ndarray]:
+    """Group B0's door blobs into one mask per physical door.
 
-    Different-sized blobs on the same depth plane are one door, not many —
-    gate the union, once. ``labels``/``stats`` from connectedComponentsWithStats.
+    B0 fragments a single door into several blobs — those sit at the same
+    depth and belong in one mask. Two actually-separate doors sit at different
+    depths and must stay two masks: collapsing every candidate onto the single
+    biggest blob (the old behaviour) silently capped detection at one door per
+    frame, merging or dropping anything else regardless of where it was.
+    Greedy union by depth proximity instead: each cluster is seeded by its
+    largest remaining blob, absorbing others within ``DEPTH_MERGE_TOL`` of it.
+    ``labels``/``stats`` from connectedComponentsWithStats.
     """
     import cv2
 
     area = cv2.CC_STAT_AREA
-    anchor = max(cand_ids, key=lambda c: stats[c, area])
     z = depth_mm.astype(np.float32) / 1000.0
 
     def med_depth(cid: int) -> float:
         zc = z[(labels == cid) & (depth_mm > 0)]
         return float(np.median(zc)) if zc.size > 30 else float("nan")
 
-    z0 = med_depth(anchor)
-    merged = labels == anchor
-    if np.isfinite(z0):
-        for c in cand_ids:
-            if c == anchor:
-                continue
-            zc = med_depth(c)
-            if np.isfinite(zc) and abs(zc - z0) <= DEPTH_MERGE_TOL:
-                merged |= labels == c
-
+    depths = {c: med_depth(c) for c in cand_ids}
+    remaining = sorted(cand_ids, key=lambda c: -stats[c, area])
     k = np.ones((MERGE_CLOSE_PX, MERGE_CLOSE_PX), np.uint8)
-    merged = cv2.morphologyEx(merged.astype(np.uint8), cv2.MORPH_CLOSE, k).astype(bool)
-    return merged
+
+    masks = []
+    while remaining:
+        anchor = remaining.pop(0)
+        group = [anchor]
+        z0 = depths[anchor]
+        if np.isfinite(z0):
+            still = []
+            for c in remaining:
+                zc = depths[c]
+                if np.isfinite(zc) and abs(zc - z0) <= DEPTH_MERGE_TOL:
+                    group.append(c)
+                else:
+                    still.append(c)
+            remaining = still
+
+        merged = np.zeros(labels.shape, dtype=bool)
+        for c in group:
+            merged |= labels == c
+        merged = cv2.morphologyEx(merged.astype(np.uint8), cv2.MORPH_CLOSE, k).astype(bool)
+        masks.append(merged)
+    return masks

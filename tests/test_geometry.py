@@ -64,12 +64,12 @@ def test_no_depth_always_kept():
     assert very_wide.keep
 
 
-def test_consolidate_merges_same_depth_blobs():
+def test_cluster_merges_same_depth_blobs():
     import cv2
 
-    from segformer.geometry import consolidate_door
+    from segformer.geometry import cluster_doors
 
-    # two blobs, same depth plane -> one merged mask
+    # two blobs, same depth plane -> one cluster, one mask
     binm = np.zeros((H, W), np.uint8)
     binm[100:300, 250:330] = 1     # big
     binm[120:180, 360:400] = 1     # small, to the side
@@ -77,15 +77,18 @@ def test_consolidate_merges_same_depth_blobs():
     cand = [c for c in range(1, nlab) if stats[c, cv2.CC_STAT_AREA] >= 150]
     assert len(cand) == 2
     depth = _vertical_plane(2.0)
-    merged = consolidate_door(lab, cand, stats, depth)
-    # both components present in the merged mask
-    assert merged[110, 300] and merged[140, 380]
+    masks = cluster_doors(lab, cand, stats, depth)
+    assert len(masks) == 1
+    assert masks[0][110, 300] and masks[0][140, 380]
 
 
-def test_consolidate_drops_far_depth_blob():
+def test_cluster_keeps_far_depth_blob_as_second_door():
+    """Two blobs at different depths are two doors, not one merged mask and
+    not one dropped -- this is the fix for the old 'only one door per frame'
+    cap: a real second door used to be silently merged or discarded here."""
     import cv2
 
-    from segformer.geometry import consolidate_door
+    from segformer.geometry import cluster_doors
 
     binm = np.zeros((H, W), np.uint8)
     binm[100:300, 250:330] = 1
@@ -93,7 +96,16 @@ def test_consolidate_drops_far_depth_blob():
     nlab, lab, stats, _ = cv2.connectedComponentsWithStats(binm)
     cand = [c for c in range(1, nlab) if stats[c, cv2.CC_STAT_AREA] >= 150]
     depth = np.full((H, W), 2000, np.uint16)
-    depth[:, 360:] = 5000          # second blob is 3 m further -> not the same door
-    merged = consolidate_door(lab, cand, stats, depth)
-    assert merged[110, 300]
-    assert not merged[150, 400]
+    depth[:, 360:] = 5000          # second blob is 3 m further -> a different door
+    masks = cluster_doors(lab, cand, stats, depth)
+    assert len(masks) == 2
+    near, far = (masks if masks[0][110, 300] else masks[::-1])
+    assert near[110, 300] and not near[150, 400]
+    assert far[150, 400] and not far[110, 300]
+
+
+def test_cluster_handles_no_candidates():
+    from segformer.geometry import cluster_doors
+
+    lab = np.zeros((H, W), np.int32)
+    assert cluster_doors(lab, [], np.zeros((1, 8)), np.zeros((H, W), np.uint16)) == []

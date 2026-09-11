@@ -52,19 +52,19 @@ def probs_to_result(frame: Frame, prob: np.ndarray, target_ids: list[int], *,
         pmap = prob[:, :, ti]
 
         if use_depth and ade_id in DOORLIKE:
-            from segformer.geometry import backproject, consolidate_door, door_gate
+            from segformer.geometry import backproject, cluster_doors, door_gate
 
             if points is None:
                 points = backproject(frame.depth, frame.intrinsics)
             pts, valid = points
 
-            merged = consolidate_door(lab, cand, stats, frame.depth)
-            if int(merged.sum()) < min_area:
-                continue
-            if not door_gate(merged, pts, valid, frame.intrinsics).keep:
-                continue
-            res.instances.append(_instance(next_id, ade_id, merged, pmap))
-            next_id += 1
+            for merged in cluster_doors(lab, cand, stats, frame.depth):
+                if int(merged.sum()) < min_area:
+                    continue
+                if not door_gate(merged, pts, valid, frame.intrinsics).keep:
+                    continue
+                res.instances.append(_instance(next_id, ade_id, merged, pmap))
+                next_id += 1
         else:
             for c in cand:
                 if stats[c, cv2.CC_STAT_AREA] < min_area:

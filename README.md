@@ -76,11 +76,12 @@ The two `replay`s are equivalent — a recording published by either is byte-ide
 - **Precision stack** (B0 is only 37 mIoU, so filtering does the work):
   1. threshold the door *probability* map at 0.85, not argmax — argmax eats the
      wall around the door;
-  2. depth-consolidate — B0 emits ~5 fragmented door blobs; merge the ones on
-     the same depth plane into one region (`geometry.consolidate_door`);
+  2. depth-cluster — B0 emits ~5 fragmented door blobs; group blobs on the
+     same depth plane into one mask per physical door, so a second door at a
+     different depth stays a separate detection (`geometry.cluster_doors`);
   3. depth gate (`geometry.door_gate`) — back-project, require a door-sized
      (~0.4–1.9 m wide), planar, roughly vertical structure; tolerant of a door
-     only partly in frame — runs **once** on the consolidated region;
+     only partly in frame — runs once per clustered door;
   4. temporal tracker (`tracking.py`) — 3 hits to confirm, lingers 6 frames;
      kills the frame-to-frame flicker.
 - **Threaded run loop** (`runner.py`) — inference on a worker thread, `imshow`
