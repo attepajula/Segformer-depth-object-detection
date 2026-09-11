@@ -40,8 +40,10 @@ there's a real dataset:
    Add `tools/eval.py`: precision/recall of door/railing detections vs labels.
 3. Re-tune the constants above against the eval set, not by eye.
 4. **Railings**: B0 barely sees them (2 blobs in all of session2). Options:
-   - bigger model — b1-b5 are `pytorch_model.bin` only; add a torch `.bin` →
-     MLX path to `segformer/model/convert.py` + a manifest entry.
+   - bigger model — b1/b2 already registered, try those first. b3-b5 need
+     `tools/model_info.py <repo>` (prints both the `models.toml` stanza *and*,
+     for mlx, the missing `MiTConfig` for `segformer/model/config.py` — see
+     README "Model management").
    - or a depth-primary railing detector: thin repeated vertical structure at
      hand height, lots of depth-gradient / see-through gaps.
 5. Live fps: threaded run loop is in `segformer/runner.py` (infer worker +

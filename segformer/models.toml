@@ -19,6 +19,32 @@ file        = "model.safetensors"
 sha256      = "6ae39addd01de6b1b8bde2cf677d43a5cd733424b8d186de3f95d1c51fee23f9"
 size        = 15036944
 
+[models.segformer-b1-ade]
+description = "SegFormer-B1, ADE20K-150 semantic segmentation (NVIDIA)"
+arch        = "b1"
+input       = 512
+classes     = "ade20k-150"
+source      = "hf"
+repo        = "nvidia/segformer-b1-finetuned-ade-512-512"
+revision    = "a775b4f5dcb2179e57006dca0e268281306412ef"
+file        = "pytorch_model.bin"
+sha256      = "ac49bf62c8c0578dcf17ff048930b4f886ab0bc080d23f5591669afad5ddf7da"
+size        = 54944801
+
+[models.segformer-b2-ade]
+description = "SegFormer-B2, ADE20K-150 semantic segmentation (NVIDIA)"
+# No .safetensors on HF for b1-b5, only pytorch_model.bin -- `models convert`
+# loads it via torch (requires torch installed) then builds the MLX artifact.
+arch        = "b2"
+input       = 512
+classes     = "ade20k-150"
+source      = "hf"
+repo        = "nvidia/segformer-b2-finetuned-ade-512-512"
+revision    = "de01bae28967510f9ddd496c60a969357195400c"
+file        = "pytorch_model.bin"
+sha256      = "187ca07bea003a5717c63d04ea90b07f33cd033c0ebf44b4b89fce5070d6c8f3"
+size        = 110000905
+
 # A future fine-tune would look like:
 # [models.doors-v1]
 # description = "b0 fine-tuned: door / railing / background"

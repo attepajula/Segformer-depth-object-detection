@@ -45,7 +45,7 @@ def cmd_run(args) -> int:
     from stream.consumer import FrameConsumer, RateMeter
     from segformer import overlay
 
-    seg = make_segmenter(args.backend)
+    seg = make_segmenter(args.backend, model=args.model)
     seg.load(args.checkpoint)
 
     has_display = args.overlay or args.save
@@ -118,9 +118,9 @@ def cmd_bench(args) -> int:
     from segformer.backends import make_segmenter
     from stream.consumer import FrameConsumer
 
-    seg = make_segmenter(args.backend)
+    seg = make_segmenter(args.backend, model=args.model)
     t = time.time()
-    seg.load()
+    seg.load(args.checkpoint)
     print(f"load {time.time() - t:.1f}s")
 
     consumer = FrameConsumer(args.endpoint)
@@ -228,7 +228,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("run", parents=[common], help="consume + segment + overlay")
     sp.add_argument("--backend", default=None, choices=["mlx", "torch", "torch-mps", "dummy"],
                     help="default: $SEGFORMER_BACKEND, else mlx")
-    sp.add_argument("--checkpoint", default=None)
+    sp.add_argument("--model", default=None,
+                    help="registry name from models.toml (default from [defaults])")
+    sp.add_argument("--checkpoint", default=None,
+                    help="override: a local weights file, or (torch backend) an HF repo id -- "
+                         "skips the registry entirely")
     sp.add_argument("--overlay", action="store_true", help="OpenCV window")
     sp.add_argument("--save", default=None, metavar="DIR", help="write overlay PNGs")
     sp.add_argument("--max-frames", type=int, default=0)
@@ -239,6 +243,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("bench", parents=[common], help="per-frame latency / fps")
     sp.add_argument("--backend", default=None, choices=["mlx", "torch", "torch-mps", "dummy"],
                     help="default: $SEGFORMER_BACKEND, else mlx")
+    sp.add_argument("--model", default=None, help="registry name from models.toml")
+    sp.add_argument("--checkpoint", default=None, help="override -- see `run --help`")
     sp.add_argument("--frames", type=int, default=300)
     sp.set_defaults(func=cmd_bench)
 

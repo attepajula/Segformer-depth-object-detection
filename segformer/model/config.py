@@ -24,7 +24,7 @@ from segformer.labels import (
 
 __all__ = [
     "ADE20K_NUM_CLASSES", "ADE20K_TARGETS", "IMAGENET_MEAN", "IMAGENET_STD",
-    "MiTConfig", "CONFIGS", "MIT_B0", "MIT_B2",
+    "MiTConfig", "CONFIGS", "MIT_B0", "MIT_B1", "MIT_B2",
 ]
 
 
@@ -50,6 +50,14 @@ MIT_B0 = MiTConfig(
     decoder_hidden_size=256,
 )
 
+MIT_B1 = MiTConfig(
+    name="b1",
+    hidden_sizes=(64, 128, 320, 512),
+    depths=(2, 2, 2, 2),
+    num_heads=(1, 2, 5, 8),
+    decoder_hidden_size=256,
+)
+
 MIT_B2 = MiTConfig(
     name="b2",
     hidden_sizes=(64, 128, 320, 512),
@@ -58,4 +66,4 @@ MIT_B2 = MiTConfig(
     decoder_hidden_size=768,
 )
 
-CONFIGS = {"b0": MIT_B0, "b2": MIT_B2}
+CONFIGS = {"b0": MIT_B0, "b1": MIT_B1, "b2": MIT_B2}

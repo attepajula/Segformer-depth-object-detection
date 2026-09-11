@@ -35,9 +35,19 @@ def remap_key(k: str) -> str | None:
     return k
 
 
+def _load_raw(src: Path) -> dict[str, mx.array]:
+    """Read a HF checkpoint (.safetensors or torch .bin) into MLX arrays."""
+    if src.suffix == ".bin":
+        import torch
+
+        state = torch.load(str(src), map_location="cpu", weights_only=True)
+        return {k: mx.array(v.float().numpy()) for k, v in state.items()}
+    return mx.load(str(src))
+
+
 def convert(src: str | Path, arch: str) -> dict[str, mx.array]:
-    """Read a HF safetensors, return the MLX param dict. Raises on key mismatch."""
-    raw = mx.load(str(src))
+    """Read a HF checkpoint, return the MLX param dict. Raises on key mismatch."""
+    raw = _load_raw(Path(src))
     out: dict[str, mx.array] = {}
     for hf_key, arr in raw.items():
         mlx_key = remap_key(hf_key)
