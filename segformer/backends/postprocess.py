@@ -1,8 +1,12 @@
 """Probability maps -> SegResult. Framework-free (numpy + cv2 only).
 
 Both backends produce per-class probability maps the same way; everything
-after that — thresholding, connected components, depth consolidation, the door
-gate, and temporal smoothing — is shared here.
+after that — thresholding, connected components, depth clustering, and
+temporal smoothing — is shared here.
+
+On this branch: door_gate (size/planar/vertical rejection) is disabled —
+door-like clusters go straight from depth-clustering to output, no geometry
+filtering.
 """
 
 from __future__ import annotations
@@ -37,7 +41,6 @@ def probs_to_result(frame: Frame, prob: np.ndarray, target_ids: list[int], *,
     res = SegResult(frame_id=frame.frame_id, timestamp_ns=frame.timestamp_ns)
     next_id = 1
     k3 = np.ones((3, 3), np.uint8)
-    points = None  # backproject lazily, once, only if a door candidate exists
 
     for ti, ade_id in enumerate(target_ids):
         thresh = PROB_THRESH.get(ade_id, DEFAULT_PROB_THRESH)
@@ -52,16 +55,10 @@ def probs_to_result(frame: Frame, prob: np.ndarray, target_ids: list[int], *,
         pmap = prob[:, :, ti]
 
         if use_depth and ade_id in DOORLIKE:
-            from segformer.geometry import backproject, cluster_doors, door_gate
-
-            if points is None:
-                points = backproject(frame.depth, frame.intrinsics)
-            pts, valid = points
+            from segformer.geometry import cluster_doors
 
             for merged in cluster_doors(lab, cand, stats, frame.depth):
                 if int(merged.sum()) < min_area:
-                    continue
-                if not door_gate(merged, pts, valid, frame.intrinsics).keep:
                     continue
                 res.instances.append(_instance(next_id, ade_id, merged, pmap))
                 next_id += 1
