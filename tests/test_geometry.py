@@ -48,11 +48,20 @@ def test_floor_rejected_as_not_vertical():
     assert not g.keep
 
 
-def test_no_depth_falls_back_to_keep():
+def test_no_depth_always_kept():
+    """No usable depth => defer to the RGB model, never reject on 2D shape
+    alone. A close door with no depth reading can legitimately fill the frame
+    or be wide -- that used to get it rejected; it no longer does."""
     depth = np.zeros((H, W), np.uint16)
     pts, valid = backproject(depth, INTR)
-    g = door_gate(_rect(280, 60, 360, 420), pts, valid, INTR)
-    assert g.keep and g.reason in ("shallow-keep", "insufficient-depth")
+    small = door_gate(_rect(280, 60, 360, 420), pts, valid, INTR)
+    assert small.keep and small.reason == "no-depth-keep"
+
+    fills_frame = door_gate(_rect(0, 0, W, H), pts, valid, INTR)
+    assert fills_frame.keep
+
+    very_wide = door_gate(_rect(0, 200, W, 260), pts, valid, INTR)
+    assert very_wide.keep
 
 
 def test_consolidate_merges_same_depth_blobs():

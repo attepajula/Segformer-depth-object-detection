@@ -24,9 +24,9 @@ DOOR_W = (0.4, 1.9)          # single leaf .. wide / double
 DOOR_H_MIN = 0.9            # tolerate a cropped door
 DOOR_H_MAX = 2.7
 WALL_W = 2.3                 # wider => wall
-NO_DEPTH_MAX_FRAC = 0.55     # without depth: reject a blob bigger than this
-NO_DEPTH_MAX_ASPECT = 1.6    # without depth: reject much-wider-than-tall
-MIN_VALID_FRAC = 0.25        # need this much of the mask to carry depth
+MIN_VALID_FRAC = 0.25        # need this much of the mask to carry depth;
+                             # below this there's no 2D-shape fallback reject —
+                             # see door_gate's "no-depth-keep" branch
 PLANE_TOL = 0.06             # m
 PLANE_INLIER = 0.45
 MAX_NORMAL_Y = 0.55          # |n_y|: 0 vertical surface, 1 floor/ceiling
@@ -78,12 +78,13 @@ def door_gate(mask: np.ndarray, points: np.ndarray, valid: np.ndarray,
     m = mask & valid
     nvalid = int(m.sum())
     if nvalid < 80 or nvalid < MIN_VALID_FRAC * area:
-        # no usable depth: judge from 2D shape only.
-        if frac > NO_DEPTH_MAX_FRAC:
-            return GateResult(False, "fills-frame", frame_frac=frac)
-        if bw_px / max(bh_px, 1) > NO_DEPTH_MAX_ASPECT:
-            return GateResult(False, "wider-than-tall", frame_frac=frac)
-        return GateResult(True, "shallow-keep", frame_frac=frac)
+        # No usable depth to judge geometry against (too close for the sensor's
+        # minimum range, a reflective/glass door, a hole in the depth map, or
+        # just too far in from a short USB tether). Previously this rejected a
+        # blob that filled too much of the frame or was too wide — but a close
+        # door legitimately does both, and "no depth" is not evidence of "no
+        # door". Defer entirely to the RGB model + probability threshold.
+        return GateResult(True, "no-depth-keep", frame_frac=frac)
 
     pts = points[m]
     z_med = float(np.median(pts[:, 2]))
