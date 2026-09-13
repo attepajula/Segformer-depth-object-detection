@@ -142,11 +142,18 @@ Cache dir: `$SEGFORMER_MODELS_DIR` if set, else `<repo>/weights/` (gitignored).
 
 `run --model <name>` / `bench --model <name>`, **`--backend mlx`**:
 auto-`pull`+`convert` an already-**registered** name the first time it's used.
-**`--backend torch`**: neither happens — it downloads straight from `repo` via
-`transformers`, no `weights/` involvement. Either way, they never register a
-new name for you; that's always the manual step above. A fine-tune: same
-stanza shape with `source = "local"`, drop the weights file in
-`weights/<name>/` yourself, then `models convert <name>`.
+**`--backend torch`**: if the manifest's `file` is already `.safetensors`
+(b0), it loads straight from `repo`/`revision` via `transformers`, no
+`weights/` involvement. If it's a `pytorch_model.bin` (b1/b2 today), the
+torch backend does its own one-time conversion into `weights/<name>/` —
+sha256-pinned source download, then a local `model.safetensors` +
+`config.json` it loads from on every subsequent run, never a raw `.bin` load
+at inference time (`registry.ensure_torch_source`, not a `models` subcommand
+— it happens automatically the first time `--backend torch` is used with
+that model). Either way, no CLI command here registers a new name for you;
+that's always the manual step above. A fine-tune: same stanza shape with
+`source = "local"`, drop the weights file in `weights/<name>/` yourself, then
+`models convert <name>`.
 
 ## Usage
 
@@ -225,41 +232,83 @@ Recordings are large (GB/minute) and not in git — move them out of band. Forma
 |---|---|
 | `stream/` — frame contract, codec, recording, replay, subscribe | done — independent of the net |
 | `segmenter.py`, `overlay.py` | done |
-| `model/` — MiT encoder + decode head (MLX) | done, HF-validated bit-exact |
-| `model/registry.py` + `models.toml` | done — pinned, sha256, offline-first |
+| `model/` — MiT encoder + decode head (MLX) | done; `tools/compare_hf.py` currently shows ~5e-3 mean logit diff / 99.97% argmax agreement vs HF, not bit-exact — see "Known limits" |
+| `model/registry.py` + `models.toml` | done — pinned, sha256, offline-first; b1/b2 also converted to a local safetensors copy for the torch backend (see "Model management") |
 | `model/convert.py` — HF safetensors → MLX artifact | done |
 | `backends/postprocess.py` | done — shared prob→mask→gate→tracker pipeline |
-| `backends/mlx_backend.py` | done — MLX SegFormer → probability maps |
-| `backends/torch_backend.py` | done — HF transformers on CUDA / MPS / CPU → probability maps |
-| `geometry.py` — depth consolidate + door gate | done, tuned on session2 (one real door) |
+| `backends/mlx_backend.py` | done — MLX SegFormer → probability maps, fp16 weights by default |
+| `backends/torch_backend.py` | done — HF transformers on CUDA / MPS / CPU → probability maps, fp16 weights on GPU (CUDA/MPS), fp32 on CPU |
+| `geometry.py` — depth cluster + door gate | done, tuned on session2 (one real door); `cluster_doors` now emits one mask per depth-separated door instead of capping at one door per frame |
 | `tracking.py` — temporal hysteresis | done |
 | `runner.py` — threaded run loop | done |
 | `bench` command | done |
-| perf: infer 29 ms no-door / 39 ms door; threaded loop ~26 fps effective | ok |
+| perf (session2, this Mac, 150 frames) — see table below | ok |
+
+`bench --frames 150` on an M-series Mac, mixed door/no-door frames:
+
+| model | backend | mean latency | fps |
+|---|---|---|---|
+| b0 | mlx | 37.7 ms | 26.5 |
+| b0 | torch (MPS, fp16) | 32.2 ms | 31.1 |
+| b2 | mlx | 78.9 ms | 12.7 |
+| b2 | torch (MPS, fp16) | 63.2 ms | 15.8 |
+
+**`torch` is currently faster than `mlx` on this same Apple Silicon machine**,
+at both sizes, despite `mlx` being the "primary" backend. Both already run
+fp16 weights by default here — that's not the gap. Two real differences in
+the MLX port instead: (1) `SegFormer.class_probs()`
+(`segformer/model/segformer.py`) calls `mx.eval()` to pull the low-res
+probability map to the CPU, *then* upsamples to frame size with `cv2.resize`
+— the torch backend keeps the upsample on-GPU (`F.interpolate`) and only
+syncs once, after; (2) the MLX port never calls `mx.compile` anywhere, so
+every attention/MLP block dispatches as separate unfused Metal kernels, where
+`torch`'s MPS backend has fused kernels for the same ops built in. Neither is
+fixed yet — `mlx` stays the default backend regardless, so the two ports stay
+comparable when someone eventually needs to run this on iOS/embedded MLX
+rather than a MPS Mac.
 
 ## Known limits
 
-- **B0 (the default) is only ~37 mIoU.** Precision on doors comes from the
-  depth gate, not the model. b1/b2 are also registered (bigger, unevaluated
-  for this task); b3/b4/b5 need the manual "Model management" steps first —
-  the `.bin` → MLX conversion itself is done (`model/convert.py`), it's the
-  registry + `CONFIGS` entries that are missing.
+- **MLX-vs-HF parity is not currently bit-exact** — `tools/compare_hf.py
+  --own-preproc` shows cos-sim 1.0, ~99.97% argmax agreement, but ~5e-3 mean
+  logit diff, above its own `<1e-3` bar. Same magnitude on b0/b1/b2 alike, and
+  the pinned revision matches HF's current `main` exactly, so it isn't a
+  weight/revision problem — most likely drift between whatever `transformers`
+  version this was last validated against and the one installed now
+  (`transformers` 5.16.1 / `torch` 2.14 here). Functionally fine (99.97%
+  agreement), just don't take the old "bit-exact" claim at face value.
+- **B0 (the default) is only ~37 mIoU** and has no real advantage over b1/b2
+  anymore now that the torch backend runs fp16 too — it exists mainly because
+  it's the one model with a native HF safetensors file, needing no local
+  conversion (see "Model management"). Precision on doors comes from the
+  depth gate, not the model, at any of these sizes. b3/b4/b5 need the manual
+  "Model management" steps first — the `.bin` → MLX conversion itself is done
+  (`model/convert.py`), it's the registry + `CONFIGS` entries that are
+  missing.
 - **One real door, tuned on it** — session2 has a single door (short USB
   tether, door barely fits the frame). On a 250-frame segment with it in view:
   detected ~96% of frames, 2 on/off flips. session1 (no door): 0 false doors.
-  Not validated on multiple doors / door types / open doors.
-- **fps floor is the model** — ~22 ms forward for B0 at 512² on the GPU,
-  memory-bandwidth-bound (fp16 gives nothing). +5–7 ms preprocess + softmax,
-  +~10 ms depth path on door frames. The threaded loop hides decode/overlay/
-  imshow behind inference, so effective ~26 fps; `capture serve` (Rosetta)
-  sharing the machine still costs a few fps live.
+  Multi-door footage now exists (mobile recordings), but hasn't been run
+  through this pipeline yet to confirm `cluster_doors` behaves on it — see
+  HANDOFF.md.
+- **b1/b2 only ship `pytorch_model.bin` on HF** (checked directly — no
+  `refs/pr/2`, no safetensors variant at all, on either repo). The torch
+  backend never repeatedly unpickles that file: `registry.ensure_torch_source`
+  converts it to a local, sha256-source-pinned `model.safetensors` +
+  `config.json` once, and `from_pretrained` loads that local directory from
+  then on — still going through transformers' own old→new key renaming
+  (needed: `transformers` 5.x moved SegFormer's internal module names, a raw
+  `load_state_dict` would silently produce a randomly-initialized model
+  instead of erroring).
 
 ## Next
 
 1. Railing: B0 barely sees railings (2 blobs in all of session2). Needs a
    bigger model or a depth-primary detector (thin repeated vertical structure).
-2. Try b1/b2 (already registered) or register b3–b5 (see "Model management"),
-   compare accuracy/fps — this just hasn't been evaluated yet. Or a
-   smaller model input (384²) for ~15 ms fwd, opposite direction.
-3. Split door-from-wall when B0 merges them beyond depth-consolidation
-   (a depth-plane discontinuity within the merged region).
+2. Run the new mobile multi-door recordings through `cluster_doors` / the full
+   pipeline — it's only been checked against synthetic depth so far
+   (`tests/test_geometry.py`).
+3. Split door-from-wall when B0 merges them beyond depth-clustering (a
+   depth-plane discontinuity within the merged region).
+4. mlx catch-up: `mx.compile` the forward pass, keep the probability-map
+   upsample on-GPU instead of syncing early — see the perf table above.

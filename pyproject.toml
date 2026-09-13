@@ -17,7 +17,7 @@ dependencies = [
 mlx = ["mlx>=0.32", "pillow>=10"]
 # Alternate backend: SegFormer via HF transformers on Apple MPS or CPU.
 # For a machine without MLX. Also covers tools/compare_hf.py.
-torch = ["torch>=2.4", "torchvision>=0.19", "transformers>=4.40", "pillow>=10"]
+torch = ["torch>=2.6", "torchvision>=0.19", "transformers>=4.49", "pillow>=10"]
 reference = ["segformer[torch]"]
 viewer = ["opencv-python>=4.8"]
 dev = ["pytest>=7", "opencv-python>=4.8"]

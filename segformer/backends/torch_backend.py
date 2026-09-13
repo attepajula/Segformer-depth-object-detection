@@ -36,6 +36,7 @@ class TorchSegmenter(Segmenter):
         self.targets = targets or ADE20K_TARGETS
         self._net = None
         self._device = None
+        self._dtype = None
         self._input = 512
         self._tracker = None
         if smooth:
@@ -59,20 +60,36 @@ class TorchSegmenter(Segmenter):
                 "  uv pip install --python .venv/bin/python -e '.[torch]'"
             ) from e
 
-        from segformer.model.registry import get
+        from segformer.model.registry import ensure_torch_source, get
 
         spec = get(self.model_name)
         self._input = _INPUT.get(spec.arch, 512)
-        src = checkpoint or spec.repo
-        kw = {} if checkpoint else {"revision": spec.revision}
-        self._net = SegformerForSemanticSegmentation.from_pretrained(src, **kw).eval()
+        if checkpoint:
+            self._net = SegformerForSemanticSegmentation.from_pretrained(checkpoint).eval()
+        elif spec.file.endswith(".safetensors"):
+            # already safetensors on the pinned revision -- transformers reads
+            # it directly, no .bin/pickle path involved.
+            self._net = SegformerForSemanticSegmentation.from_pretrained(
+                spec.repo, revision=spec.revision).eval()
+        else:
+            # repo only ships pytorch_model.bin: ensure_torch_source converts
+            # it to safetensors once (sha256-verified source, never re-read
+            # after) and caches the pinned config alongside it, then
+            # from_pretrained loads that local directory -- still going
+            # through transformers' own old-checkpoint key renaming, unlike
+            # a raw load_state_dict.
+            local_dir = ensure_torch_source(spec)
+            self._net = SegformerForSemanticSegmentation.from_pretrained(local_dir).eval()
         if torch.cuda.is_available():
             self._device = "cuda"
         elif torch.backends.mps.is_available():
             self._device = "mps"
         else:
             self._device = "cpu"
-        self._net.to(self._device)
+        # fp16 halves compute + bandwidth on GPU; CPU has no fast fp16 kernels
+        # for these ops, so stay fp32 there.
+        self._dtype = torch.float16 if self._device != "cpu" else torch.float32
+        self._net.to(self._device, dtype=self._dtype)
 
     def _class_probs(self, rgb: np.ndarray, ids: list[int]) -> np.ndarray:
         import cv2
@@ -83,13 +100,14 @@ class TorchSegmenter(Segmenter):
         img = cv2.resize(rgb, (self._input, self._input), interpolation=cv2.INTER_LINEAR)
         x = img.astype(np.float32) / 255.0
         x = (x - np.array(IMAGENET_MEAN, np.float32)) / np.array(IMAGENET_STD, np.float32)
-        t = torch.from_numpy(x).permute(2, 0, 1).unsqueeze(0).to(self._device)
+        t = torch.from_numpy(x).permute(2, 0, 1).contiguous().unsqueeze(0)
+        t = t.to(self._device, dtype=self._dtype)
 
         with torch.no_grad():
             logits = self._net(pixel_values=t).logits          # (1, 150, H/4, W/4)
-            p = logits.softmax(dim=1)[:, ids]                    # (1, T, H/4, W/4)
+            p = logits.float().softmax(dim=1)[:, ids]            # softmax in fp32: stable, cheap (T << 150)
             p = F.interpolate(p, size=(h, w), mode="bilinear", align_corners=False)
-        return p[0].permute(1, 2, 0).float().cpu().numpy()       # (H, W, T)
+        return p[0].permute(1, 2, 0).contiguous().cpu().numpy()  # (H, W, T), already fp32
 
     def infer(self, frame: Frame, state: Any | None) -> tuple[SegResult, Any]:
         ids = list(self.targets)

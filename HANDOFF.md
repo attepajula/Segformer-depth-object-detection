@@ -1,7 +1,9 @@
-# Handoff — paused pending mobile recordings
+# Handoff — mobile recordings now exist, multi-door not yet run through the pipeline
 
-Paused until the Xtion can run off a MacBook and record **many doors + railings**
-(short USB tether on the Mac Studio = one door, barely in frame).
+The MacBook + Xtion can now record **many doors + railings** (the old blocker
+— Mac Studio's short USB tether meaning one door, barely in frame — is gone).
+`cluster_doors` (below) was written for this but hasn't been checked against
+the new footage yet, only synthetic depth in `tests/test_geometry.py`.
 
 ## Where it stands
 
@@ -10,9 +12,21 @@ Two repos, `../xtion` (capture) and this one (segmentation). Both committed clea
 - **xtion**: RGB-D capture over ZMQ, schema-v1 frame contract. `capture serve
   --device xtion` runs the camera (x86_64 CPython under Rosetta — libOpenNI2 is
   x86_64). `capture replay session2/ --publish --loop` feeds recordings.
-- **segformer**: SegFormer-B0 (ADE20K) ported to MLX, validated bit-exact vs HF.
-  `segformer run --backend mlx --overlay` consumes the stream, segments
-  door/railing, overlays. Model registry: `segformer models …`.
+- **segformer**: SegFormer (ADE20K) ported to MLX + a torch backend (HF
+  transformers). `segformer run --backend mlx --overlay` consumes the stream,
+  segments door/railing, overlays. Model registry: `segformer models …`.
+  b0/b1/b2 all registered and working on both backends — b0 no longer has a
+  real edge over b1/b2 now that torch also runs fp16 (see "Backends" below);
+  it's kept mainly because it's the one model with a native HF safetensors
+  file.
+- MLX-vs-HF parity (`tools/compare_hf.py`) is **not currently bit-exact** —
+  cos-sim 1.0 and ~99.97% argmax agreement, but ~5e-3 mean logit diff, above
+  the tool's own `<1e-3` bar, on all of b0/b1/b2 alike (so not a b1/b2-specific
+  regression). Traced to a `transformers`/`torch` version mismatch against
+  whatever was installed when this was last "bit-exact" (currently
+  `transformers` 5.16.1 / `torch` 2.14 — ruled out eager-vs-sdpa attention as
+  the cause, didn't dig further). Not urgent — 99.97% argmax agreement is
+  functionally fine — but don't trust the old "bit-exact" claim at face value.
 
 ## Door pipeline — works on the one door we have
 
@@ -24,36 +38,38 @@ now emits one mask per depth-separated blob group instead of collapsing
 everything onto the single biggest blob (the old one-door-per-frame cap), but
 it's only been checked on synthetic depth in `tests/test_geometry.py`.
 
-Precision comes from filtering, not the model (B0 is 37 mIoU):
-1. threshold door **probability** > 0.85 (not argmax) — `MlxSegmenter._PROB_THRESH`
+Precision comes from filtering, not the model (all sizes are shared here, B0
+is only 37 mIoU):
+1. threshold door **probability** > 0.85 (not argmax) — `backends/postprocess.py: PROB_THRESH`
 2. depth-cluster B0's fragmented blobs into one mask per door — `geometry.cluster_doors()`
 3. depth gate each clustered door — `geometry.door_gate()` (size / planar / vertical)
 4. temporal tracker — `segformer/tracking.py` (3 hits confirm, 6 linger)
 
-All three were tuned against **one door**. Expect to re-tune constants once
-there's a real dataset:
+All four were tuned against **one door**. Expect to re-tune constants once
+there's a real multi-door dataset:
 - `geometry.py`: `DOOR_W`, `DOOR_H_MIN/MAX`, `WALL_W`, `PLANE_INLIER`, `MAX_NORMAL_Y`
-- `mlx_backend.py`: `_PROB_THRESH`, `min_area`, `_MIN_COMP`
+- `backends/postprocess.py`: `PROB_THRESH`, `MIN_COMP_PX`, `min_area` (passed in from the CLI)
 - `geometry.py` clustering: `DEPTH_MERGE_TOL`, `MERGE_CLOSE_PX`
 - `tracking.py`: `min_hits`, `max_misses`, `iou_match`
 
-## When recordings exist — next steps
+## Next steps
 
-1. Record varied doors (open/closed, wide/narrow, angled, partial) + railings.
-   `capture record --device xtion --seconds N --out sessionN/`.
+1. ~~Record varied doors~~ — done, mobile recordings exist. Run them through
+   `segformer run` / `bench` and check `cluster_doors` actually separates
+   distinct doors on real footage, not just the synthetic-depth unit tests.
 2. Label a handful of frames (even rough boxes) → a small eval set.
    Add `tools/eval.py`: precision/recall of door/railing detections vs labels.
-3. Re-tune the constants above against the eval set, not by eye.
-4. **Railings**: B0 barely sees them (2 blobs in all of session2). Options:
-   - bigger model — b1/b2 already registered, try those first. b3-b5 need
-     `tools/model_info.py <repo>` (prints both the `models.toml` stanza *and*,
-     for mlx, the missing `MiTConfig` for `segformer/model/config.py` — see
-     README "Model management").
-   - or a depth-primary railing detector: thin repeated vertical structure at
-     hand height, lots of depth-gradient / see-through gaps.
+3. Re-tune the constants below against the eval set, not by eye — they were
+   all tuned on the single-door session2, before multi-door footage existed.
+4. **Railings**: B0 barely sees them (2 blobs in all of session2). b1/b2 are
+   registered and confirmed working now (fp16 fixed the b2 slowness) — check
+   whether they see railings better before reaching for a depth-primary
+   detector (thin repeated vertical structure at hand height, lots of
+   depth-gradient / see-through gaps).
 5. Live fps: threaded run loop is in `segformer/runner.py` (infer worker +
-   main-thread display), ~26 fps effective. Model forward (~22 ms) is the
-   floor. For more: smaller input (384^2) or a bigger+quantised model.
+   main-thread display). See "Backends" below for current per-model/backend
+   numbers — `torch` is faster than `mlx` on this Mac right now, worth using
+   for anything latency-sensitive until the mlx-side gaps are closed.
 
 ## Backends
 
@@ -61,8 +77,24 @@ there's a real dataset:
 - **mlx** — Apple GPU, the hand-port, `.[mlx]`. **torch** — HF transformers on
   CUDA / MPS / CPU, `.[torch]`, for a machine without MLX. Both feed the same
   `backends/postprocess.py` (threshold → components → depth gate → tracker);
-  they differ only in producing the probability maps. ~equal speed on this Mac
-  (mlx 27 fps, torch-MPS 26 fps).
+  they differ only in producing the probability maps. Both run fp16 weights
+  on GPU by default now (mlx always did; torch backend does too as of the
+  fp16 cast added in `torch_backend.load()`, fp32 only when the device is CPU).
+- **`torch` is currently *faster* than `mlx` on this same Apple Silicon Mac**
+  — `bench --frames 150` on session2: b0 mlx 37.7ms/26.5fps vs torch 32.2ms/
+  31.1fps; b2 mlx 78.9ms/12.7fps vs torch 63.2ms/15.8fps. fp16 isn't the
+  differentiator (both have it) — two real gaps in the MLX port: (1)
+  `SegFormer.class_probs()` (`segformer/model/segformer.py`) does `mx.eval()`
+  to pull the low-res probability map to CPU *before* upsampling with
+  `cv2.resize`, where torch upsamples on-GPU (`F.interpolate`) and only syncs
+  once, at the very end; (2) the MLX port never calls `mx.compile` — every
+  attention/MLP block is separate unfused Metal kernel launches, vs. torch's
+  MPS backend having fused kernels for the same ops. Neither fixed yet.
+  `mlx` stays the default backend anyway.
+- b1/b2 only ship `pytorch_model.bin` on HF (checked: no `refs/pr/2`, no
+  safetensors variant on either repo). The torch backend now converts that to
+  a local safetensors copy once (`registry.ensure_torch_source`) instead of
+  unpickling it on every load — see README "Model management".
 - `segformer/labels.py` is framework-free; `segformer/model/__init__.py` is
   lazy — a `.[torch]`-only install never imports mlx.
 

@@ -5,6 +5,7 @@ Not part of the test suite (needs torch + transformers). Run once after any
 change to the model or weight mapping.
 
     .venv/bin/python tools/compare_hf.py [--size b0] [--image path.png]
+    .venv/bin/python tools/compare_hf.py --size b1 --reference-frame session1/chunk_00003.npz
 """
 from __future__ import annotations
 
@@ -18,7 +19,10 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--size", default="b0")
     ap.add_argument("--own-preproc", action="store_true", help="feed identical tensor to HF")
-    ap.add_argument("--image", default=None, help="RGB image; default = a session1 frame")
+    ap.add_argument("--image", default=None, help="RGB image; default = --reference-frame")
+    ap.add_argument("--reference-frame", default="../xtion/session1/chunk_00003.npz",
+                    help="a recorded .npz chunk to pull frame 5's rgb from, used when "
+                         "--image is not given")
     args = ap.parse_args()
 
     if args.image:
@@ -26,15 +30,16 @@ def main() -> int:
 
         rgb = cv2.imread(args.image)[:, :, ::-1].copy()
     else:
-        rgb = np.load("/Users/porpyla/projut/xtion/session1/chunk_00003.npz")["rgb"][5]
+        rgb = np.load(args.reference_frame)["rgb"][5]
 
     # --- HF reference -------------------------------------------------
     import torch
     from transformers import SegformerForSemanticSegmentation, SegformerImageProcessor
 
-    repo = {"b0": "nvidia/segformer-b0-finetuned-ade-512-512",
-            "b2": "nvidia/segformer-b2-finetuned-ade-512-512"}[args.size]
-    hf = SegformerForSemanticSegmentation.from_pretrained(repo).eval()
+    from segformer.model.registry import get
+
+    spec = get(f"segformer-{args.size}-ade")
+    hf = SegformerForSemanticSegmentation.from_pretrained(spec.repo, revision=spec.revision).eval()
 
     # --- MLX port ---------------------------------------------------
     import mlx.core as mx
@@ -51,7 +56,7 @@ def main() -> int:
         with torch.no_grad():
             hf_logits = hf(pixel_values=px).logits
     else:
-        proc = SegformerImageProcessor.from_pretrained(repo)
+        proc = SegformerImageProcessor.from_pretrained(spec.repo, revision=spec.revision)
         with torch.no_grad():
             hf_logits = hf(**proc(images=rgb, return_tensors="pt")).logits
     hf_logits = hf_logits[0].permute(1, 2, 0).numpy()
