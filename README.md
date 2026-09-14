@@ -6,6 +6,44 @@ NeurIPS 2021), pretrained on **ADE20K** (already has `door`, `railing`,
 `bannister`, `screen door` — no training needed). Two interchangeable
 backends: **MLX** (Apple GPU) or **PyTorch** (CUDA / MPS / CPU).
 
+## Install
+
+One extra is required and platform-specific — `mlx` (Apple Silicon) or
+`torch` (everything else) — plus `viewer` (the OpenCV overlay window) and
+`dev` (pytest). `uv sync` creates `.venv` and installs the project + chosen
+extras in one step, from `pyproject.toml`:
+
+**Apple Silicon:**
+
+```sh
+uv sync --extra mlx --extra viewer --extra dev
+```
+
+**CUDA / Linux / Windows / any Mac without MLX:**
+
+```sh
+uv sync --extra torch --extra viewer --extra dev
+```
+
+**NVIDIA only** — the extra above pulls a CPU-only `torch` wheel from PyPI;
+install the CUDA wheel on top, or inference silently runs on CPU:
+
+```sh
+uv pip install --python .venv/bin/python torch --index-url https://download.pytorch.org/whl/cu124
+```
+This is a `uv pip install`, not `uv sync` — re-running `uv sync` later
+re-resolves `torch` back to the plain PyPI (CPU) wheel and undoes it, so redo
+this line after any `uv sync --extra torch`.
+
+**Verify the install:**
+
+```sh
+.venv/bin/python -m pytest -q
+```
+
+`.[torch]` also covers the HF-parity check (mlx port validated against the
+original): `tools/compare_hf.py`, `tools/compare_hf.py --own-preproc`.
+
 ## Apple Silicon vs. everything else
 
 **The default backend is `mlx`, unconditionally — on every platform.** There
@@ -18,25 +56,6 @@ and fails. You must say which backend you want, every time, one of two ways:
 export SEGFORMER_BACKEND=torch                            # or once per shell
 ```
 (`--backend` wins if both are set.)
-
-**Install** — pick the block for your machine:
-
-```sh
-uv venv --python python3.14 .venv
-
-# Apple Silicon:
-uv pip install --python .venv/bin/python -e ".[mlx,viewer,dev]"
-
-# CUDA / Linux / Windows / any Mac without MLX:
-uv pip install --python .venv/bin/python -e ".[torch,viewer,dev]"
-# NVIDIA: install the CUDA torch wheel FIRST, or it silently falls back to CPU:
-uv pip install --python .venv/bin/python torch --index-url https://download.pytorch.org/whl/cu124
-
-.venv/bin/python -m pytest -q
-```
-
-`.[torch]` also covers the HF-parity check (mlx port validated against the
-original): `tools/compare_hf.py`, `tools/compare_hf.py --own-preproc`.
 
 ## Pipeline
 
