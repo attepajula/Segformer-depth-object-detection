@@ -19,12 +19,13 @@ flowchart TB
         direction TB
         RECV["Take the newest frame<br/>(older ones are skipped)"]
         UNPACK["Unpack it<br/>colour + depth images, camera lens info"]
-        NET["Run the network<br/>SegFormer-B0 at 512×512, MLX or PyTorch<br/>→ a door/railing likelihood per pixel<br/>(~22 ms on this Mac's GPU; more on CPU)"]
+        NET["Run the network<br/>SegFormer-B0 (or b1/b2) at 512×512, MLX or PyTorch<br/>→ a door/railing likelihood, but only on a coarse<br/>128×128 grid (the model downsamples 4×)<br/>(~22 ms on this Mac's GPU; more on CPU)"]
+        UPSAMPLE["Stretch the likelihood back out<br/>128×128 → full frame size, smoothed<br/>(bilinear) — mask edges are only ever<br/>as sharp as that stretch, not pixel-exact"]
         MASK["Turn likelihood into a shape<br/>keep pixels the model is sure are 'door'<br/>(not just its best guess)"]
         DEPTH["Check it against depth<br/>merge blobs at the same distance into one door,<br/>reject anything wall-sized, tilted, or not flat"]
         HOLD["Require it to persist<br/>a door must show up 3 frames running,<br/>and it lingers 6 frames after it's lost<br/>— stops the flicker"]
         RESULT["Detections for this frame<br/>per door/railing: stable id, class,<br/>confidence, pixel mask, box"]
-        RECV --> UNPACK --> NET --> MASK --> DEPTH --> HOLD --> RESULT
+        RECV --> UNPACK --> NET --> UPSAMPLE --> MASK --> DEPTH --> HOLD --> RESULT
     end
 
     HANDOFF{{"newest (frame + detections)<br/>one slot, overwritten each frame"}}
@@ -59,6 +60,11 @@ flowchart TB
   metres.
 - **The model is weak on its own** (small, general-purpose). Precision comes
   from the depth check and the persistence rule, not the network.
+- **The network's own output is 128×128, not frame resolution.** SegFormer's
+  decode head runs at input/4 (512/4) regardless of model size (b0/b1/b2 all
+  share `strides=(4,2,2,2)`) — every downstream mask is a bilinear stretch of
+  that coarse grid, so boundaries are never sharper than a ~4px-at-512 block,
+  whatever the original camera resolution is.
 - **No shared code with the camera side.** `stream/` carries its own copy of
   the frame contract; a version mismatch is rejected, never misread.
 
