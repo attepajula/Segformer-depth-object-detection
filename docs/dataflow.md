@@ -40,10 +40,10 @@ flowchart TB
         OVER --> SHOW
     end
 
-    subgraph NAV["Downstream consumer — NOT BUILT"]
+    subgraph NAV["Downstream consumer — MVP mock: consumer/spatial.py, run --spatial"]
         direction TB
         DIST["Distance to each door<br/>take the door mask's pixels in the frame's depth,<br/>median of the valid readings<br/>no reading → unknown, not 0"]
-        PLANE["Door in metres<br/>plane + aim point, from depth + lens"]
+        PLANE["Spatial-audio cue<br/>bearing + distance → left/right pan + loudness<br/>drawn as a radar, nothing is played"]
         DIST --> PLANE
     end
 
@@ -73,6 +73,10 @@ flowchart TB
   rides along untouched in the handoff; a consumer that needs distance takes
   the door mask, looks up those pixels in the frame's depth, and computes it
   itself. Nothing in the network thread produces or smooths a distance.
+  `consumer/spatial.py` is an MVP of that consumer, opened with
+  `segformer run --spatial`. It smooths distance per id, draws a top-down
+  radar and shows a pan and loudness bar per object. A real navigation
+  consumer is still not built.
   What the consumer has to cope with:
   - *Sensor range.* The Xtion reads depth only from roughly 0.8 m to 3.5 m.
     Closer, or on a glass/reflective door, there is no reading — and the depth

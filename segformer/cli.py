@@ -48,15 +48,20 @@ def cmd_run(args) -> int:
     seg = make_segmenter(args.backend, model=args.model)
     seg.load(args.checkpoint)
 
-    has_display = args.overlay or args.save
+    has_display = args.overlay or args.save or args.spatial
     if has_display and not args.no_thread:
         from segformer.runner import run_threaded
 
         print(f"segformer run (threaded): backend={seg.name} endpoint={args.endpoint} "
-              f"overlay={args.overlay} save={args.save or '-'}")
+              f"overlay={args.overlay} save={args.save or '-'} spatial={args.spatial}")
         run_threaded(args.endpoint, seg, show=args.overlay, save_dir=args.save,
-                     max_frames=args.max_frames)
+                     max_frames=args.max_frames, spatial=args.spatial)
         return 0
+
+    if args.spatial:
+        from consumer import spatial as spatial_view
+
+        smoother = spatial_view.CueSmoother()
 
     consumer = FrameConsumer(args.endpoint)
     meter = RateMeter()
@@ -91,8 +96,12 @@ def cmd_run(args) -> int:
                     _write_png(save_dir / f"{frame.frame_id:06d}.png", img)
                 if args.overlay and not overlay.show(img):
                     break
-            else:
+            elif not args.spatial:
                 print(f"  frame {frame.frame_id}  inst={len(result.instances)}  {fps:4.1f} fps")
+            if args.spatial:
+                cues = smoother.update(spatial_view.compute_cues(frame, result))
+                if not spatial_view.show(spatial_view.render(cues, frame.intrinsics)):
+                    break
 
             n += 1
             if args.max_frames and n >= args.max_frames:
@@ -235,6 +244,9 @@ def build_parser() -> argparse.ArgumentParser:
                          "skips the registry entirely")
     sp.add_argument("--overlay", action="store_true", help="OpenCV window")
     sp.add_argument("--save", default=None, metavar="DIR", help="write overlay PNGs")
+    sp.add_argument("--spatial", action="store_true",
+                    help="second window: mock downstream consumer showing each object's "
+                         "direction/distance as spatial-audio cues (top-down radar + L/R pan)")
     sp.add_argument("--max-frames", type=int, default=0)
     sp.add_argument("--no-thread", action="store_true",
                     help="serial loop (default: infer on a worker thread)")

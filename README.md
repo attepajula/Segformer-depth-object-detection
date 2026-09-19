@@ -205,8 +205,26 @@ $PY -m segformer run --backend torch --save out/      # headless, PNG per frame
 | `--checkpoint <path-or-repo>` | none | **per-invocation override of the weights file**, skipping the registry for this one call. `--model` is still read, just for the architecture (`arch` → input size) — the checkpoint's own architecture isn't inspected, so point `--model` at a stanza with a matching `arch` or shapes won't line up. Meaning differs by backend: with `--backend mlx` it must be a path to an **already-converted** `model.mlx.safetensors` (the output of `models convert` — mlx can't take a raw repo or raw file here); with `--backend torch` it's a raw HF repo id *or* local directory, handed straight to `transformers.from_pretrained` — no manifest entry needed for this one call, but also no revision pin (you get whatever `main` currently is). |
 | `--overlay` | off | open an OpenCV window: RGB + tinted door/railing masks + fps |
 | `--save DIR` | none | write one PNG per frame to `DIR` instead of / as well as showing a window |
+| `--spatial` | off | open a second window with a mock downstream consumer. Shows each object's direction and distance as spatial-audio cues. Nothing is played. See "Spatial view" below. |
 | `--max-frames N` | `0` (unlimited) | stop after `N` frames |
-| `--no-thread` | off | run the old serial loop (decode→infer→draw, one thread) instead of the default worker-thread + display-thread split. Only matters when `--overlay` or `--save` is set — `run` with neither always runs the print-only serial loop. |
+| `--no-thread` | off | run the old serial loop (decode→infer→draw, one thread) instead of the default worker-thread + display-thread split. Only matters when `--overlay`, `--save` or `--spatial` is set — `run` with none of them always runs the print-only serial loop. |
+
+#### Spatial view (`--spatial`)
+
+An MVP of the downstream consumer. It lives in `consumer/`, apart from the net.
+
+```sh
+PY=.venv/bin/python
+$PY -m segformer run --backend torch --overlay --spatial   # both windows
+$PY -m segformer run --backend torch --spatial             # spatial window only
+```
+
+- **Left:** top-down radar. You are at the bottom. Rings are 1 m apart. Lines are the camera's field of view.
+- **Right:** one row per object. Bearing, distance, and a bar split into left and right ear. Louder means closer.
+- **Distance** is the median depth of the mask interior. The network never sees depth.
+- **No depth reading:** the dot sits on the radar edge as a hollow ring. Bearing is still right. Distance shows `?`.
+- Bearing and distance are smoothed per object id.
+- Press `q` in either window to quit.
 
 ### `bench` — per-frame latency / fps, no display
 
@@ -260,6 +278,7 @@ Recordings are large (GB/minute) and not in git — move them out of band. Forma
 | `geometry.py` — depth cluster + door gate | done, tuned on session2 (one real door); `cluster_doors` now emits one mask per depth-separated door instead of capping at one door per frame |
 | `tracking.py` — temporal hysteresis | done |
 | `runner.py` — threaded run loop | done |
+| `consumer/spatial.py` — mock downstream consumer (`run --spatial`) | MVP. Draws cues, plays no audio. Checked on synthetic depth and one real recording. |
 | `bench` command | done |
 | perf (session2, this Mac, 150 frames) — see table below | ok |
 

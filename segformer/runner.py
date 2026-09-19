@@ -55,7 +55,11 @@ def _show_waiting(endpoint: str) -> bool:
 
 
 def run_threaded(endpoint: str, segmenter, *, show: bool = True,
-                 save_dir=None, max_frames: int = 0) -> int:
+                 save_dir=None, max_frames: int = 0, spatial: bool = False) -> int:
+    if spatial:
+        from consumer import spatial as spatial_view
+
+        smoother = spatial_view.CueSmoother()
     stop = threading.Event()
     latest = _Latest()
     state = {"fps": 0.0, "n": 0}
@@ -114,13 +118,17 @@ def run_threaded(endpoint: str, segmenter, *, show: bool = True,
                 cv2.imwrite(str(save_dir / f"{frame.frame_id:06d}.png"), img[:, :, ::-1])
             if show and not overlay.show(img):
                 stop.set()
+            if spatial:
+                cues = smoother.update(spatial_view.compute_cues(frame, result))
+                if not spatial_view.show(spatial_view.render(cues, frame.intrinsics)):
+                    stop.set()
     except KeyboardInterrupt:
         pass
     finally:
         stop.set()
         t.join(timeout=2.0)
         segmenter.close()
-        if show:
+        if show or spatial:
             import cv2
 
             cv2.destroyAllWindows()
