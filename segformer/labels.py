@@ -14,6 +14,8 @@ ADE20K_TARGETS: dict[int, str] = {
     38: "railing",
     95: "bannister",
     58: "screen door",
+    53: "stairs",
+    59: "stairway",
 }
 
 # ADE ids that get the depth door-gate.
@@ -25,6 +27,8 @@ CLASS_COLOR: dict[int, tuple[int, int, int]] = {
     38: (60, 220, 60),    # railing     — green
     95: (255, 235, 0),    # bannister   — yellow
     58: (230, 60, 230),   # screen door — magenta
+    53: (0, 230, 230),    # stairs      — cyan
+    59: (150, 90, 255),   # stairway    — violet
 }
 CLASS_COLOR_DEFAULT = (0, 180, 255)
 

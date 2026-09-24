@@ -86,3 +86,10 @@ def test_render_draws_with_and_without_cues():
     assert img.dtype == np.uint8 and img.ndim == 3
     cues = [Cue(1, 14, 0.2, 2.0, 0.2, 0.5), Cue(2, 38, -0.4, None, -0.39, 0.3)]
     assert render(cues, INTR).shape == img.shape
+
+
+def test_stairs_cue_is_named_and_ranged():
+    f = _frame(np.full((H, W), 3000, np.uint16))
+    (c,) = compute_cues(f, _result(_inst(300, 340, label=53)))
+    assert c.name == "stairs"
+    assert abs(c.distance_m - 3.0) < 0.05

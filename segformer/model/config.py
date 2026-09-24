@@ -5,7 +5,7 @@ with Transformers" (Xie et al., NeurIPS 2021). NOT SeqFormer (video instance
 segmentation) — different model, one letter apart.
 
 Semantic segmentation, pretrained on ADE20K (150 classes). We keep the door /
-railing / bannister / screen-door channels and fold everything else into
+railing / bannister / screen-door / stairs / stairway channels and fold everything else into
 background. No training — the pretrained weights already know these classes.
 """
 

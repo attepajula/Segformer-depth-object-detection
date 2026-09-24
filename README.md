@@ -1,9 +1,9 @@
 # segformer
 
-Semantic segmentation of **doors and railings** in the RGB-D stream from the
+Semantic segmentation of **doors, railings and stairs** in the RGB-D stream from the
 [`xtion`](../xtion) capture pipeline. Model: **SegFormer** (Xie et al.,
 NeurIPS 2021), pretrained on **ADE20K** (already has `door`, `railing`,
-`bannister`, `screen door` — no training needed). Two interchangeable
+`bannister`, `screen door`, `stairs`, `stairway` — no training needed). Two interchangeable
 backends: **MLX** (Apple GPU) or **PyTorch** (CUDA / MPS / CPU).
 
 ## Install
@@ -203,7 +203,7 @@ $PY -m segformer run --backend torch --save out/      # headless, PNG per frame
 | `--backend {mlx,torch,dummy}` | `$SEGFORMER_BACKEND`, else `mlx` | which segmenter — see "Apple Silicon vs. everything else" above |
 | `--model <name>` | `[defaults].model` in `models.toml` | which registered model — see "Model management" above |
 | `--checkpoint <path-or-repo>` | none | **per-invocation override of the weights file**, skipping the registry for this one call. `--model` is still read, just for the architecture (`arch` → input size) — the checkpoint's own architecture isn't inspected, so point `--model` at a stanza with a matching `arch` or shapes won't line up. Meaning differs by backend: with `--backend mlx` it must be a path to an **already-converted** `model.mlx.safetensors` (the output of `models convert` — mlx can't take a raw repo or raw file here); with `--backend torch` it's a raw HF repo id *or* local directory, handed straight to `transformers.from_pretrained` — no manifest entry needed for this one call, but also no revision pin (you get whatever `main` currently is). |
-| `--overlay` | off | open an OpenCV window: RGB + tinted door/railing masks + fps |
+| `--overlay` | off | open an OpenCV window: RGB + tinted door/railing/stairs masks + fps |
 | `--save DIR` | none | write one PNG per frame to `DIR` instead of / as well as showing a window |
 | `--spatial` | off | open a second window with a mock downstream consumer. Shows each object's direction and distance as spatial-audio cues. Nothing is played. See "Spatial view" below. |
 | `--max-frames N` | `0` (unlimited) | stop after `N` frames |

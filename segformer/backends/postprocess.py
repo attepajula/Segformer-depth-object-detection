@@ -14,7 +14,7 @@ from segformer.labels import DOORLIKE
 from segformer.segmenter import Instance, SegResult
 
 PROB_THRESH = {14: 0.85, 58: 0.85}   # door / screen-door: high, isolate the leaf
-DEFAULT_PROB_THRESH = 0.45           # railing / bannister
+DEFAULT_PROB_THRESH = 0.45           # railing / bannister / stairs / stairway
 MIN_COMP_PX = 150                    # ignore components smaller than this
 
 
