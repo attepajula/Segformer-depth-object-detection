@@ -21,6 +21,17 @@ ADE20K_TARGETS: dict[int, str] = {
 # ADE ids that get the depth door-gate.
 DOORLIKE = {14, 58}
 
+# label id -> sound class, for the spatial-audio consumer (consumer.audio):
+# one tone for both door types, one for railing/bannister, one for stairs.
+SOUND_CLASS: dict[int, str] = {
+    14: "door",
+    58: "door",
+    38: "railing",
+    95: "railing",
+    53: "stairs",
+    59: "stairs",
+}
+
 # fixed overlay colour per class (RGB).
 CLASS_COLOR: dict[int, tuple[int, int, int]] = {
     14: (255, 130, 0),    # door        — orange

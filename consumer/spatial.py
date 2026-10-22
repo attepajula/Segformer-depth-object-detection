@@ -1,9 +1,10 @@
 """MVP downstream consumer: where is each detected object, as a spatial-audio cue.
 
 Takes a ``Frame`` (colour + depth + lens) and its detections and works out, per
-object, the direction and distance a spatial-audio renderer would need. Nothing
-is played — ``render`` draws what would be heard: a top-down radar plus a
-left/right pan and loudness per object.
+object, the direction and distance a spatial-audio renderer would need.
+``render`` draws what gets heard: a top-down radar plus a left/right pan and
+loudness per object. The audio itself is ``consumer.audio`` — this module only
+computes the cues (``Cue``, ``compute_cues``, ``CueSmoother``) that it plays.
 
 Segformer's network never sees depth, so distance is computed here: the median
 of the mask interior's valid depth readings. No reading -> distance is None

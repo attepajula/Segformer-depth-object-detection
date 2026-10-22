@@ -55,11 +55,18 @@ def _show_waiting(endpoint: str) -> bool:
 
 
 def run_threaded(endpoint: str, segmenter, *, show: bool = True,
-                 save_dir=None, max_frames: int = 0, spatial: bool = False) -> int:
+                 save_dir=None, max_frames: int = 0, spatial: bool = False,
+                 mute: bool = False) -> int:
+    audio = None
     if spatial:
         from consumer import spatial as spatial_view
 
         smoother = spatial_view.CueSmoother()
+        if not mute:
+            from consumer.audio import AudioRenderer
+
+            audio = AudioRenderer()
+            audio.start()
     stop = threading.Event()
     latest = _Latest()
     state = {"fps": 0.0, "n": 0}
@@ -120,6 +127,8 @@ def run_threaded(endpoint: str, segmenter, *, show: bool = True,
                 stop.set()
             if spatial:
                 cues = smoother.update(spatial_view.compute_cues(frame, result))
+                if audio is not None:
+                    audio.update(cues)
                 if not spatial_view.show(spatial_view.render(cues, frame.intrinsics)):
                     stop.set()
     except KeyboardInterrupt:
@@ -128,6 +137,8 @@ def run_threaded(endpoint: str, segmenter, *, show: bool = True,
         stop.set()
         t.join(timeout=2.0)
         segmenter.close()
+        if audio is not None:
+            audio.stop()
         if show or spatial:
             import cv2
 

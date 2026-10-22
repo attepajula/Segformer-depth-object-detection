@@ -20,7 +20,11 @@ mlx = ["mlx>=0.32", "pillow>=10"]
 torch = ["torch>=2.6", "torchvision>=0.19", "transformers>=4.49", "pillow>=10"]
 reference = ["segformer[torch]"]
 viewer = ["opencv-python>=4.8"]
-dev = ["pytest>=7", "opencv-python>=4.8"]
+# `--spatial` audio: one tone for both door types, one for railing/bannister,
+# one (pulsed) for stairs. Needs PortAudio; without it `run --spatial` still
+# shows the radar window, just silent.
+audio = ["sounddevice>=0.4"]
+dev = ["pytest>=7", "opencv-python>=4.8", "sounddevice>=0.4"]
 
 [project.scripts]
 segformer = "segformer.cli:main"
