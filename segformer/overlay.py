@@ -41,9 +41,25 @@ def render(frame: Frame, result: SegResult, *, alpha: float = 0.45, fps: float |
     return out
 
 
-def show(rgb: np.ndarray, *, title: str = "segformer") -> bool:
-    """Display one frame. Returns False when the user asks to quit."""
+def poll_key(delay_ms: int = 1) -> int:
+    """One ``cv2.waitKey`` call. OpenCV has a single key-event queue shared by
+    every window, not one per window -- call this once per loop tick and hand
+    the result to every ``show()`` that iteration, or two windows' own
+    ``waitKey`` calls split the same stream and each only gets some of the
+    keypresses."""
+    import cv2
+
+    return cv2.waitKey(delay_ms) & 0xFF
+
+
+def show(rgb: np.ndarray, *, title: str = "segformer", key: int | None = None) -> bool:
+    """Display one frame. Returns False when the user asks to quit.
+    ``key`` -- pass the result of one shared ``poll_key()`` when another
+    window is shown the same iteration; omit it to poll here (fine when this
+    is the only window)."""
     import cv2
 
     cv2.imshow(title, rgb[:, :, ::-1])  # RGB->BGR
-    return (cv2.waitKey(1) & 0xFF) != ord("q")
+    if key is None:
+        key = poll_key(1)
+    return key != ord("q")

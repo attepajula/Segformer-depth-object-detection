@@ -12,6 +12,12 @@ Mixing is pure numpy (``_render_block``), so it's unit-testable without
 audio hardware. ``AudioRenderer`` wraps that in a ``sounddevice`` output
 stream and is the only part that touches hardware; importing this module
 never requires sounddevice to be installed, only calling ``start()`` does.
+
+The end user is blind -- every bit of feedback here has to be audible, not
+just drawn. The 1/2/3 mute hotkeys fire a confirmation chirp
+(``confirmation_chirp``) through this same stream; ``consumer.spatial``'s
+on-screen HUD for mute state is a bonus for a sighted developer at a
+terminal, never the mechanism itself.
 """
 
 from __future__ import annotations
@@ -38,6 +44,16 @@ PAN_EXAGGERATION = 2.2     # Cue.pan = sin(azimuth), true to the geometry -- but
                            # audibly toward an ear; the radar view is untouched, this is
                            # audio-only exaggeration.
 
+# toggle-mute confirmation chirp -- the user is blind, so this sound IS the
+# feedback, not a screen HUD alongside it. Distinct timbre/pattern from the
+# three navigation tones so it reads as "the system heard your keypress":
+# one falling pip = muted, two rising pips = unmuted.
+CHIRP_LOW_HZ = 300.0
+CHIRP_HIGH_HZ = 1200.0
+CHIRP_PIP_S = 0.09
+CHIRP_GAP_S = 0.05
+CHIRP_GAIN = 0.6
+
 # voice name -> tone Hz. Whole numbers so a cycle divides SAMPLE_RATE evenly
 # -- lets the phase index wrap every second with no discontinuity (see
 # AudioRenderer._sample_idx). No tremolo/pulsing: it read as drumming, not a
@@ -52,6 +68,13 @@ VOICES: dict[str, int] = {
 def voice_for(label: int) -> str | None:
     """Sound class for an ADE20K label id, or None if it doesn't get one."""
     return SOUND_CLASS.get(label)
+
+
+def voice_for_digit(n: int) -> str | None:
+    """1/2/3 (as typed in the spatial window) -> voice name, by VOICES'
+    declared order -- the key the toggle-mute hotkeys use."""
+    names = list(VOICES)
+    return names[n - 1] if 1 <= n <= len(names) else None
 
 
 def levels_for_cues(cues) -> dict[str, tuple[float, float]]:
@@ -69,6 +92,25 @@ def levels_for_cues(cues) -> dict[str, tuple[float, float]]:
             pan = max(-1.0, min(1.0, c.pan * PAN_EXAGGERATION))
             best[voice] = (c.gain, pan)
     return best
+
+
+def _pip(freq: float) -> np.ndarray:
+    """One short tone burst, windowed so it fades in/out with no click."""
+    n = int(CHIRP_PIP_S * SAMPLE_RATE)
+    t = np.arange(n, dtype=np.float64) / SAMPLE_RATE
+    env = np.sin(np.pi * t / CHIRP_PIP_S) ** 2
+    return env * np.sin(2.0 * np.pi * freq * t)
+
+
+def confirmation_chirp(muted: bool) -> np.ndarray:
+    """Mono transient for a mute/unmute toggle -- pure numpy, testable
+    without hardware. Mixed on top of the continuous voices in
+    ``AudioRenderer._callback``, not in place of them."""
+    if muted:
+        return (CHIRP_GAIN * _pip(CHIRP_LOW_HZ)).astype(np.float32)
+    gap = np.zeros(int(CHIRP_GAP_S * SAMPLE_RATE), dtype=np.float64)
+    pip = _pip(CHIRP_HIGH_HZ)
+    return (CHIRP_GAIN * np.concatenate([pip, gap, pip])).astype(np.float32)
 
 
 def _render_block(frames: int, sample_idx: int,
@@ -102,8 +144,11 @@ class AudioRenderer:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._targets: dict[str, tuple[float, float]] = {}
+        self._muted: set[str] = set()
         self._cur: dict[str, list[float]] = {v: [0.0, 0.0] for v in VOICES}
         self._sample_idx = 0
+        self._chirp: np.ndarray | None = None
+        self._chirp_pos = 0
         self._stream = None
 
     def start(self) -> bool:
@@ -132,6 +177,31 @@ class AudioRenderer:
         with self._lock:
             self._targets = targets
 
+    def toggle_voice(self, voice: str) -> bool:
+        """Flip mute for one sound class (the 1/2/3 hotkeys). Returns the
+        new muted state. Muting ramps to silence like any other level
+        change -- no click. Also queues the confirmation chirp: the user is
+        blind, so that chirp -- not the console print below -- is the real
+        feedback that the keypress registered."""
+        with self._lock:
+            if voice in self._muted:
+                self._muted.discard(voice)
+                muted = False
+            else:
+                self._muted.add(voice)
+                muted = True
+            self._chirp = confirmation_chirp(muted)
+            self._chirp_pos = 0
+        print(f"  spatial audio: {voice} {'muted' if muted else 'unmuted'}")
+        return muted
+
+    def muted_voices(self) -> frozenset[str]:
+        """Current mute state, for a HUD (e.g. ``consumer.spatial.render``)
+        -- the console print on toggle is easy to miss once the radar window
+        has focus."""
+        with self._lock:
+            return frozenset(self._muted)
+
     def stop(self) -> None:
         if self._stream is not None:
             self._stream.stop()
@@ -142,14 +212,31 @@ class AudioRenderer:
         try:
             with self._lock:
                 targets = self._targets
+                muted = self._muted
+                chirp_seg = None
+                if self._chirp is not None:
+                    end = min(self._chirp_pos + frames, len(self._chirp))
+                    chirp_seg = self._chirp[self._chirp_pos:end]
+                    if end >= len(self._chirp):
+                        self._chirp = None
+                        self._chirp_pos = 0
+                    else:
+                        self._chirp_pos = end
             alpha = min(1.0, (frames / SAMPLE_RATE) / RAMP_S)
             levels = {}
             for voice, cur in self._cur.items():
                 tgain, tpan = targets.get(voice, (0.0, cur[1]))
+                if voice in muted:
+                    tgain = 0.0
                 cur[0] += alpha * (tgain - cur[0])
                 cur[1] += alpha * (tpan - cur[1])
                 levels[voice] = (cur[0], cur[1])
-            outdata[:] = _render_block(frames, self._sample_idx, levels)
+            out = _render_block(frames, self._sample_idx, levels)
+            if chirp_seg is not None and len(chirp_seg):
+                out[:len(chirp_seg), 0] += chirp_seg
+                out[:len(chirp_seg), 1] += chirp_seg
+                np.clip(out, -1.0, 1.0, out=out)   # chirp rides on top of the already-clipped mix
+            outdata[:] = out
             self._sample_idx = (self._sample_idx + frames) % SAMPLE_RATE
         except Exception as e:
             outdata.fill(0.0)

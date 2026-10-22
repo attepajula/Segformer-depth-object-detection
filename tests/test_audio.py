@@ -5,7 +5,17 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from consumer.audio import PAN_EXAGGERATION, SAMPLE_RATE, VOICES, _render_block, levels_for_cues, voice_for
+from consumer.audio import (
+    PAN_EXAGGERATION,
+    SAMPLE_RATE,
+    VOICES,
+    AudioRenderer,
+    _render_block,
+    confirmation_chirp,
+    levels_for_cues,
+    voice_for,
+    voice_for_digit,
+)
 from consumer.spatial import Cue
 
 
@@ -87,6 +97,54 @@ def test_panned_voice_reaches_the_near_ear_first():
     corr = np.correlate(left, right, mode="full")
     lag = corr.argmax() - (len(left) - 1)
     assert lag > 0
+
+
+def test_voice_for_digit_matches_the_1_2_3_hotkeys():
+    assert voice_for_digit(1) == "door"
+    assert voice_for_digit(2) == "railing"
+    assert voice_for_digit(3) == "stairs"
+    assert voice_for_digit(4) is None
+    assert voice_for_digit(0) is None
+
+
+def test_toggle_voice_mutes_and_unmutes():
+    r = AudioRenderer()
+    assert r.toggle_voice("door") is True        # was unmuted -> now muted
+    assert "door" in r._muted
+    assert r.toggle_voice("door") is False       # flip back
+    assert "door" not in r._muted
+
+
+def test_muted_voice_gets_no_sound_even_with_cues_present():
+    r = AudioRenderer()
+    r.toggle_voice("railing")
+    r.update([Cue(1, 38, 0.0, 1.0, 0.0, 0.9)])   # a loud, centred railing cue
+    with r._lock:
+        targets = r._targets
+        muted = r._muted
+    assert "railing" in targets                 # the cue is there
+    assert "railing" in muted                    # but muted -- the callback zeroes its gain
+
+
+def test_confirmation_chirp_differs_for_mute_vs_unmute():
+    # the user is blind -- this sound is the only feedback a toggle
+    # happened, so muted/unmuted must be reliably distinguishable: unmute
+    # is two pips (longer, with a near-silent gap), mute is one.
+    muted_chirp = confirmation_chirp(True)
+    unmuted_chirp = confirmation_chirp(False)
+    assert len(unmuted_chirp) > len(muted_chirp)
+    mid = unmuted_chirp[len(unmuted_chirp) // 2 - 50 : len(unmuted_chirp) // 2 + 50]
+    assert np.abs(mid).max() < 0.1 * np.abs(unmuted_chirp).max()   # the gap between the two pips
+    assert np.abs(muted_chirp).max() <= 1.0
+    assert np.abs(unmuted_chirp).max() <= 1.0
+
+
+def test_toggle_voice_queues_a_chirp_for_the_callback_to_mix_in():
+    r = AudioRenderer()
+    assert r._chirp is None
+    r.toggle_voice("stairs")
+    assert r._chirp is not None
+    assert r._chirp_pos == 0
 
 
 def test_phase_is_continuous_across_the_sample_idx_wrap():

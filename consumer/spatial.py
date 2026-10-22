@@ -120,8 +120,17 @@ def _rgb(label: int) -> tuple[int, int, int]:
     return tuple(int(c) for c in CLASS_COLOR.get(label, CLASS_COLOR_DEFAULT))
 
 
-def render(cues: list[Cue], intr: Intrinsics) -> np.ndarray:
-    """(H, W, 3) uint8 RGB: top-down radar on the left, per-object pan/loudness on the right."""
+# sound-class name -> one representative ADE20K id, just to pick the HUD's colour
+# (consumer.audio.VOICES has the canonical name/order; both door types share a
+# tone and both railing/bannister share one, so either id in the pair would do).
+_VOICE_LABEL = {"door": 14, "railing": 38, "stairs": 53}
+_MUTED_COLOR = (90, 90, 96)
+
+
+def render(cues: list[Cue], intr: Intrinsics, *, muted: frozenset = frozenset()) -> np.ndarray:
+    """(H, W, 3) uint8 RGB: top-down radar on the left, per-object pan/loudness on the
+    right. ``muted`` -- sound-class names currently muted (``AudioRenderer.muted_voices()``),
+    drawn as a HUD strip so the 1/2/3 toggle is visible, not just printed to the console."""
     import cv2
 
     img = np.zeros((_RADAR, _RADAR + _PANEL, 3), np.uint8)
@@ -143,6 +152,19 @@ def render(cues: list[Cue], intr: Intrinsics) -> np.ndarray:
     cv2.line(img, (_RADAR, 0), (_RADAR, _RADAR), _GRID, 1)
     cv2.putText(img, "L", (_RADAR + 12, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, _TEXT, 1)
     cv2.putText(img, "R", (_RADAR + _PANEL - 22, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, _TEXT, 1)
+
+    from consumer.audio import VOICES  # lazy: optional dep, keeps this module importable without it
+
+    x = _RADAR + 12
+    for i, voice in enumerate(VOICES, start=1):
+        is_muted = voice in muted
+        col = _MUTED_COLOR if is_muted else _rgb(_VOICE_LABEL[voice])
+        label = f"{i}:{voice}" + (" muted" if is_muted else "")
+        (w, _h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.38, 1)
+        cv2.putText(img, label, (x, 36), cv2.FONT_HERSHEY_SIMPLEX, 0.38, col, 1, cv2.LINE_AA)
+        if is_muted:
+            cv2.line(img, (x, 32), (x + w, 32), col, 1)   # strikethrough
+        x += w + 16
 
     for row, c in enumerate(sorted(cues, key=lambda c: c.distance_m if c.distance_m is not None else 1e9)):
         col = _rgb(c.label)
@@ -184,9 +206,25 @@ def render(cues: list[Cue], intr: Intrinsics) -> np.ndarray:
     return img
 
 
-def show(img: np.ndarray, *, title: str = "spatial") -> bool:
-    """Display in its own window. Returns False when the user presses q."""
+def show(img: np.ndarray, *, title: str = "spatial", audio=None, key: int | None = None) -> bool:
+    """Display in its own window. Returns False when the user presses q.
+    With ``audio`` (a consumer.audio.AudioRenderer), 1/2/3 toggle that sound
+    class on/off -- by VOICES' declared order, so 1=door, 2=railing,
+    3=stairs today. ``key`` -- pass the result of one shared
+    ``segformer.overlay.poll_key()`` when another window (``--overlay``) is
+    shown the same iteration; omit it to poll here. OpenCV has one key-event
+    queue shared by every window, not one per window -- two independent
+    ``waitKey`` calls in the same loop tick split that one stream, so each
+    window only sees some of the keypresses."""
     import cv2
 
     cv2.imshow(title, img[:, :, ::-1])
-    return (cv2.waitKey(1) & 0xFF) != ord("q")
+    if key is None:
+        key = cv2.waitKey(1) & 0xFF
+    if audio is not None and ord("1") <= key <= ord("9"):
+        from consumer.audio import voice_for_digit
+
+        voice = voice_for_digit(key - ord("0"))
+        if voice is not None:
+            audio.toggle_voice(voice)
+    return key != ord("q")
