@@ -55,7 +55,20 @@ def _show_waiting(endpoint: str) -> bool:
 
 
 def run_threaded(endpoint: str, segmenter, *, show: bool = True,
-                 save_dir=None, max_frames: int = 0) -> int:
+                 save_dir=None, max_frames: int = 0, spatial: bool = True,
+                 mute: bool = False) -> int:
+    audio = None
+    if spatial:
+        from consumer import spatial as spatial_view
+
+        smoother = spatial_view.CueSmoother()
+        if not mute:
+            from consumer.audio import AudioRenderer
+
+            audio = AudioRenderer()
+            if audio.start():
+                print("  spatial audio: keys 1/2/3 in the spatial window toggle "
+                      "door/railing/stairs sound, q quits")
     stop = threading.Event()
     latest = _Latest()
     state = {"fps": 0.0, "n": 0}
@@ -112,15 +125,30 @@ def run_threaded(endpoint: str, segmenter, *, show: bool = True,
                 import cv2
 
                 cv2.imwrite(str(save_dir / f"{frame.frame_id:06d}.png"), img[:, :, ::-1])
-            if show and not overlay.show(img):
+            # one shared key poll per tick -- see overlay.poll_key's docstring:
+            # cv2's key queue is global, two windows' own waitKey calls would
+            # split it and each would miss keys.
+            key = overlay.poll_key(1) if (show or spatial) else None
+            if show and not overlay.show(img, key=key):
                 stop.set()
+            if spatial:
+                cues = smoother.update(spatial_view.compute_cues(frame, result))
+                muted = frozenset()
+                if audio is not None:
+                    audio.update(cues)
+                    muted = audio.muted_voices()
+                radar = spatial_view.render(cues, frame.intrinsics, muted=muted)
+                if not spatial_view.show(radar, audio=audio, key=key):
+                    stop.set()
     except KeyboardInterrupt:
         pass
     finally:
         stop.set()
         t.join(timeout=2.0)
         segmenter.close()
-        if show:
+        if audio is not None:
+            audio.stop()
+        if show or spatial:
             import cv2
 
             cv2.destroyAllWindows()

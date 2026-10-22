@@ -1,10 +1,21 @@
-# segformer
+# Help for Visually Impaired People — PoC
 
-Semantic segmentation of **doors and railings** in the RGB-D stream from the
-[`xtion`](../xtion) capture pipeline. Model: **SegFormer** (Xie et al.,
-NeurIPS 2021), pretrained on **ADE20K** (already has `door`, `railing`,
-`bannister`, `screen door` — no training needed). Two interchangeable
-backends: **MLX** (Apple GPU) or **PyTorch** (CUDA / MPS / CPU).
+<img src="figures/detect_export.png" alt="A door detected and outlined, labelled &quot;door 1.34&quot;" width="320" align="left" style="margin: 0 16px 16px 0">
+
+This is a proof of concept for a navigation aid for blind and visually
+impaired people. A camera watches the room. The tool finds **doors,
+railings, and stairs** in that video, then turns each one into a **sound**
+— a tone that comes from the right direction, at the right volume for how
+far away it is. No screen, no braille, just sound: the way a blind user
+could actually use it.
+
+The video comes from the [`xtion`](../xtion) camera pipeline. The detection
+model is **SegFormer** (Xie et al., NeurIPS 2021), pretrained on **ADE20K**
+— it already knows `door`, `railing`, `bannister`, `screen door`, `stairs`,
+and `stairway`, so no extra training was needed. Two backends run the
+model: **MLX** (Apple GPU) or **PyTorch** (CUDA / MPS / CPU).
+
+<br clear="left">
 
 ## Install
 
@@ -64,9 +75,9 @@ export SEGFORMER_BACKEND=torch                            # or once per shell
  ├─ xtion  capture replay <session>          ──┐
  └─ segformer  replay <session>  (this repo) ──┤  same schema-v1 ZMQ stream
                                                ▼
-                              segformer run  ─▶ wire.decode ─▶ segmenter ─▶ overlay
-                              tcp://127.0.0.1:5556  SegFormer-B0, ADE20K
-                              (mlx | torch backend) → door/railing masks → depth gate
+                   segformer run  ─▶ wire.decode ─▶ segmenter ─▶ tracker ─▶ ┬─▶ overlay   (--overlay)
+                   tcp://127.0.0.1:5556  SegFormer B0/B1/B2, ADE20K         └─▶ consumer/  (spatial audio, on by default)
+                   (mlx | torch backend) → door/railing/stairs masks → depth gate (door/railing only)
 ```
 
 ### `stream/` vs the `xtion` repo — pick one producer
@@ -89,12 +100,14 @@ The two `replay`s are equivalent — a recording published by either is byte-ide
 - **Framework-agnostic** — everything talks to `segformer.segmenter.Segmenter` /
   `SegResult`. Backends: `mlx` (Apple GPU, primary), `torch` (HF transformers on
   CUDA / MPS / CPU — for a machine without MLX), `dummy` (no model). Same
-  probability→mask→depth-gate→tracker pipeline after the network
-  (`backends/postprocess.py`); the backends differ only in producing the
-  probability maps. Pick with `--backend`, `$SEGFORMER_BACKEND`, else `mlx`.
-- **Precision stack** (B0 is only 37 mIoU, so filtering does the work):
-  1. threshold the door *probability* map at 0.85, not argmax — argmax eats the
-     wall around the door;
+  probability→mask→tracker pipeline after the network (`backends/postprocess.py`,
+  see below); the backends differ only in producing the probability maps.
+  Pick with `--backend`, `$SEGFORMER_BACKEND`, else `mlx`.
+- **Precision stack** (B0 is only 37 mIoU, so filtering does the work). Door
+  and screen-door only get steps 2–3 (`labels.DOORLIKE`) — railing, bannister
+  and stairs go straight from step 1 to the tracker, no depth gate:
+  1. threshold the *probability* map — 0.85 for door/screen-door (argmax eats
+     the wall around a door), 0.45 for everything else;
   2. depth-cluster — B0 emits ~5 fragmented door blobs; group blobs on the
      same depth plane into one mask per physical door, so a second door at a
      different depth stays a separate detection (`geometry.cluster_doors`);
@@ -194,8 +207,9 @@ decodes, without loading a model.
 
 ```sh
 PY=.venv/bin/python
-$PY -m segformer run --backend mlx --overlay          # live window
-$PY -m segformer run --backend torch --save out/      # headless, PNG per frame
+$PY -m segformer run --backend torch                                      # just this: spatial audio, on by default
+$PY -m segformer run --backend torch --overlay --model segformer-b1-ade   # + RGB window, non-default model
+$PY -m segformer run --backend torch --save out/                          # headless, PNG per frame
 ```
 
 | flag | default | meaning |
@@ -203,10 +217,33 @@ $PY -m segformer run --backend torch --save out/      # headless, PNG per frame
 | `--backend {mlx,torch,dummy}` | `$SEGFORMER_BACKEND`, else `mlx` | which segmenter — see "Apple Silicon vs. everything else" above |
 | `--model <name>` | `[defaults].model` in `models.toml` | which registered model — see "Model management" above |
 | `--checkpoint <path-or-repo>` | none | **per-invocation override of the weights file**, skipping the registry for this one call. `--model` is still read, just for the architecture (`arch` → input size) — the checkpoint's own architecture isn't inspected, so point `--model` at a stanza with a matching `arch` or shapes won't line up. Meaning differs by backend: with `--backend mlx` it must be a path to an **already-converted** `model.mlx.safetensors` (the output of `models convert` — mlx can't take a raw repo or raw file here); with `--backend torch` it's a raw HF repo id *or* local directory, handed straight to `transformers.from_pretrained` — no manifest entry needed for this one call, but also no revision pin (you get whatever `main` currently is). |
-| `--overlay` | off | open an OpenCV window: RGB + tinted door/railing masks + fps |
+| `--overlay` | off | open an OpenCV window: RGB + tinted door/railing/stairs masks + fps |
 | `--save DIR` | none | write one PNG per frame to `DIR` instead of / as well as showing a window |
+| `--no-spatial` | off (spatial **on** by default) | skip the spatial-audio consumer -- the radar window and its one-tone-per-class audio. See "Spatial view" below. |
+| `--mute` | off | keep the radar window, skip its audio |
 | `--max-frames N` | `0` (unlimited) | stop after `N` frames |
-| `--no-thread` | off | run the old serial loop (decode→infer→draw, one thread) instead of the default worker-thread + display-thread split. Only matters when `--overlay` or `--save` is set — `run` with neither always runs the print-only serial loop. |
+| `--no-thread` | off | run the old serial loop (decode→infer→draw, one thread) instead of the default worker-thread + display-thread split. `run` with no flags at all still opens the spatial window (on by default) and runs threaded; pass `--no-spatial` too for the old bare print-only serial loop. |
+
+#### Spatial view
+
+`consumer/`, apart from the net. This is the actual point of the project, so
+it's on by default -- `--no-spatial` skips it, `--mute` keeps the window but
+drops its audio.
+
+- **Left:** top-down radar. You are at the bottom. Rings are 1 m apart. Lines are the camera's field of view.
+- **Right:** one row per object. Bearing, distance, and a bar split into left and right ear. Louder means closer.
+- **Distance** is the median depth of the mask interior. The network never sees depth.
+- **No depth reading:** the dot sits on the radar edge as a hollow ring. Bearing is still right. Distance shows `?`.
+- Bearing and distance are smoothed per object id.
+- **Audio:** one continuous tone per class -- door 220 Hz, railing 440 Hz, stairs
+  660 Hz (both door types share a tone, same for railing/bannister). Panned with
+  both volume and a small interaural delay. Needs `sounddevice` (`pip install
+  'segformer[audio]'`); missing it, or `--mute`, just runs the radar silent.
+- Press `1`/`2`/`3` in the spatial window to mute/unmute door/railing/stairs.
+  Confirmed by a chirp (one falling pip = muted, two rising = unmuted) — the
+  end user is blind, so that chirp is the real feedback; the HUD on the
+  radar panel showing the same state is only for a sighted dev at a terminal.
+- Press `q` in either window to quit.
 
 ### `bench` — per-frame latency / fps, no display
 
@@ -251,19 +288,21 @@ Recordings are large (GB/minute) and not in git — move them out of band. Forma
 |---|---|
 | `stream/` — frame contract, codec, recording, replay, subscribe | done — independent of the net |
 | `segmenter.py`, `overlay.py` | done |
-| `model/` — MiT encoder + decode head (MLX) | done; `tools/compare_hf.py` currently shows ~5e-3 mean logit diff / 99.97% argmax agreement vs HF, not bit-exact — see "Known limits" |
+| `model/` — MiT encoder + decode head (MLX) | done; not bit-exact vs HF — see "Known limits" |
 | `model/registry.py` + `models.toml` | done — pinned, sha256, offline-first; b1/b2 also converted to a local safetensors copy for the torch backend (see "Model management") |
 | `model/convert.py` — HF safetensors → MLX artifact | done |
-| `backends/postprocess.py` | done — shared prob→mask→gate→tracker pipeline |
+| `backends/postprocess.py` | done — shared prob→mask→tracker pipeline, gate only for door/screen-door |
 | `backends/mlx_backend.py` | done — MLX SegFormer → probability maps, fp16 weights by default |
 | `backends/torch_backend.py` | done — HF transformers on CUDA / MPS / CPU → probability maps, fp16 weights on GPU (CUDA/MPS), fp32 on CPU |
 | `geometry.py` — depth cluster + door gate | done, tuned on session2 (one real door); `cluster_doors` now emits one mask per depth-separated door instead of capping at one door per frame |
 | `tracking.py` — temporal hysteresis | done |
 | `runner.py` — threaded run loop | done |
+| `consumer/spatial.py` — spatial cues (direction/distance), on by default | done. Draws the radar. Checked on synthetic depth and one real recording. |
+| `consumer/audio.py` — spatial audio for the cues | done. One tone per class (door/railing/stairs), panned left/right by direction. Press 1/2/3 to mute one; a short sound confirms it, since the user can't see a screen. |
 | `bench` command | done |
-| perf (session2, this Mac, 150 frames) — see table below | ok |
+| perf (session2, Mac Studio M1 Max, 150 frames) — see table below | ok |
 
-`bench --frames 150` on an M-series Mac, mixed door/no-door frames:
+`bench --frames 150` on a Mac Studio (Apple M1 Max, 32 GB), mixed door/no-door frames:
 
 | model | backend | mean latency | fps |
 |---|---|---|---|
@@ -272,62 +311,36 @@ Recordings are large (GB/minute) and not in git — move them out of band. Forma
 | b2 | mlx | 78.9 ms | 12.7 |
 | b2 | torch (MPS, fp16) | 63.2 ms | 15.8 |
 
-**`torch` is currently faster than `mlx` on this same Apple Silicon machine**,
-at both sizes, despite `mlx` being the "primary" backend. Both already run
-fp16 weights by default here — that's not the gap. Two real differences in
-the MLX port instead: (1) `SegFormer.class_probs()`
-(`segformer/model/segformer.py`) calls `mx.eval()` to pull the low-res
-probability map to the CPU, *then* upsamples to frame size with `cv2.resize`
-— the torch backend keeps the upsample on-GPU (`F.interpolate`) and only
-syncs once, after; (2) the MLX port never calls `mx.compile` anywhere, so
-every attention/MLP block dispatches as separate unfused Metal kernels, where
-`torch`'s MPS backend has fused kernels for the same ops built in. Neither is
-fixed yet — `mlx` stays the default backend regardless, so the two ports stay
-comparable when someone eventually needs to run this on iOS/embedded MLX
-rather than a MPS Mac.
+**`torch` is currently faster than `mlx` on this same machine**, at both
+sizes — see the table above. `mlx` stays the default backend anyway, for
+when this needs to run on iOS or embedded MLX later.
 
 ## Known limits
 
-- **MLX-vs-HF parity is not currently bit-exact** — `tools/compare_hf.py
-  --own-preproc` shows cos-sim 1.0, ~99.97% argmax agreement, but ~5e-3 mean
-  logit diff, above its own `<1e-3` bar. Same magnitude on b0/b1/b2 alike, and
-  the pinned revision matches HF's current `main` exactly, so it isn't a
-  weight/revision problem — most likely drift between whatever `transformers`
-  version this was last validated against and the one installed now
-  (`transformers` 5.16.1 / `torch` 2.14 here). Functionally fine (99.97%
-  agreement), just don't take the old "bit-exact" claim at face value.
-- **B0 (the default) is only ~37 mIoU** and has no real advantage over b1/b2
-  anymore now that the torch backend runs fp16 too — it exists mainly because
-  it's the one model with a native HF safetensors file, needing no local
-  conversion (see "Model management"). Precision on doors comes from the
-  depth gate, not the model, at any of these sizes. b3/b4/b5 need the manual
-  "Model management" steps first — the `.bin` → MLX conversion itself is done
-  (`model/convert.py`), it's the registry + `CONFIGS` entries that are
-  missing.
-- **One real door, tuned on it** — session2 has a single door (short USB
-  tether, door barely fits the frame). On a 250-frame segment with it in view:
-  detected ~96% of frames, 2 on/off flips. session1 (no door): 0 false doors.
-  Multi-door footage now exists (mobile recordings), but hasn't been run
-  through this pipeline yet to confirm `cluster_doors` behaves on it — see
-  HANDOFF.md.
-- **b1/b2 only ship `pytorch_model.bin` on HF** (checked directly — no
-  `refs/pr/2`, no safetensors variant at all, on either repo). The torch
-  backend never repeatedly unpickles that file: `registry.ensure_torch_source`
-  converts it to a local, sha256-source-pinned `model.safetensors` +
-  `config.json` once, and `from_pretrained` loads that local directory from
-  then on — still going through transformers' own old→new key renaming
-  (needed: `transformers` 5.x moved SegFormer's internal module names, a raw
-  `load_state_dict` would silently produce a randomly-initialized model
-  instead of erroring).
-
-## Next
-
-1. Railing: B0 barely sees railings (2 blobs in all of session2). Needs a
-   bigger model or a depth-primary detector (thin repeated vertical structure).
-2. Run the new mobile multi-door recordings through `cluster_doors` / the full
-   pipeline — it's only been checked against synthetic depth so far
-   (`tests/test_geometry.py`).
-3. Split door-from-wall when B0 merges them beyond depth-clustering (a
-   depth-plane discontinuity within the merged region).
-4. mlx catch-up: `mx.compile` the forward pass, keep the probability-map
-   upsample on-GPU instead of syncing early — see the perf table above.
+- **MLX output does not exactly match the original HF model.**
+  `tools/compare_hf.py --own-preproc` checks this. It shows 99.97% agreement
+  on the final answer (argmax), but the raw numbers (logits) differ by about
+  5e-3 on average — the target was under 1e-3. Same gap on b0, b1, and b2.
+  The pinned model revision matches HF's current version exactly, so that's
+  not the cause. The real cause is not confirmed. In practice this is fine
+  — 99.97% agreement is high. Just don't trust an old claim that it was
+  "bit-exact".
+- **B0 is the default model, but it is not very accurate** — only about 37
+  mIoU on ADE20K. It's the default because it's the only model with a native
+  HF safetensors file, not because it detects better than b1 or b2. b1 and
+  b2 haven't been measured here, so we can't say which is more accurate.
+  Door detection stays accurate anyway, because the depth gate — not the
+  model — does that work, at any model size. b3, b4, and b5 aren't set up
+  yet. The code to convert them to MLX already exists (`model/convert.py`).
+  What's missing is adding them to the registry and to `CONFIGS` — see
+  "Model management".
+- **b1 and b2 only have an old-style weights file (`pytorch_model.bin`) on
+  HuggingFace.** We checked directly — no safetensors version exists for
+  either model. The torch backend doesn't reload that file every time. The
+  first time you use `--backend torch` with b1 or b2, it converts the file
+  once into a local `model.safetensors` + `config.json`
+  (`registry.ensure_torch_source`). Every run after that loads the local
+  file instead. Loading still goes through `transformers`' own renaming
+  step — `transformers` 5.x renamed SegFormer's internal module names.
+  Skipping that step would silently load a broken, randomly-initialized
+  model, with no error.

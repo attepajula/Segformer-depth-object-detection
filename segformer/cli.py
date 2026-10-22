@@ -48,15 +48,30 @@ def cmd_run(args) -> int:
     seg = make_segmenter(args.backend, model=args.model)
     seg.load(args.checkpoint)
 
-    has_display = args.overlay or args.save
+    args.spatial = not args.no_spatial    # on by default -- see "--no-spatial" help
+
+    has_display = args.overlay or args.save or args.spatial
     if has_display and not args.no_thread:
         from segformer.runner import run_threaded
 
         print(f"segformer run (threaded): backend={seg.name} endpoint={args.endpoint} "
-              f"overlay={args.overlay} save={args.save or '-'}")
+              f"overlay={args.overlay} save={args.save or '-'} spatial={args.spatial}")
         run_threaded(args.endpoint, seg, show=args.overlay, save_dir=args.save,
-                     max_frames=args.max_frames)
+                     max_frames=args.max_frames, spatial=args.spatial, mute=args.mute)
         return 0
+
+    if args.spatial:
+        from consumer import spatial as spatial_view
+
+        smoother = spatial_view.CueSmoother()
+        audio = None
+        if not args.mute:
+            from consumer.audio import AudioRenderer
+
+            audio = AudioRenderer()
+            if audio.start():
+                print("  spatial audio: keys 1/2/3 in the spatial window toggle "
+                      "door/railing/stairs sound, q quits")
 
     consumer = FrameConsumer(args.endpoint)
     meter = RateMeter()
@@ -85,14 +100,28 @@ def cmd_run(args) -> int:
             result, state = seg.infer(frame, state)
             fps = meter.tick()
 
+            # one shared key poll per tick -- cv2's key queue is global, not
+            # per-window; two independent waitKey calls (overlay + spatial)
+            # would split the same stream and each window would miss keys.
+            key = overlay.poll_key(1) if (args.overlay or args.spatial) else None
+
             if args.overlay or save_dir is not None:
                 img = overlay.render(frame, result, fps=fps)
                 if save_dir is not None:
                     _write_png(save_dir / f"{frame.frame_id:06d}.png", img)
-                if args.overlay and not overlay.show(img):
+                if args.overlay and not overlay.show(img, key=key):
                     break
-            else:
+            elif not args.spatial:
                 print(f"  frame {frame.frame_id}  inst={len(result.instances)}  {fps:4.1f} fps")
+            if args.spatial:
+                cues = smoother.update(spatial_view.compute_cues(frame, result))
+                muted = frozenset()
+                if audio is not None:
+                    audio.update(cues)
+                    muted = audio.muted_voices()
+                radar = spatial_view.render(cues, frame.intrinsics, muted=muted)
+                if not spatial_view.show(radar, audio=audio, key=key):
+                    break
 
             n += 1
             if args.max_frames and n >= args.max_frames:
@@ -102,6 +131,8 @@ def cmd_run(args) -> int:
     finally:
         consumer.close()
         seg.close()
+        if args.spatial and audio is not None:
+            audio.stop()
     print(f"processed {n} frames")
     return 0
 
@@ -235,6 +266,13 @@ def build_parser() -> argparse.ArgumentParser:
                          "skips the registry entirely")
     sp.add_argument("--overlay", action="store_true", help="OpenCV window")
     sp.add_argument("--save", default=None, metavar="DIR", help="write overlay PNGs")
+    sp.add_argument("--no-spatial", action="store_true",
+                    help="skip the spatial-audio consumer -- on by default: a second window "
+                         "(top-down radar + L/R pan) and its audio -- one tone for both door "
+                         "types, one for railing/bannister, one for stairs -- unless --mute. "
+                         "1/2/3 in that window mute/unmute a class, confirmed by a chirp.")
+    sp.add_argument("--mute", action="store_true",
+                    help="keep the radar window, skip its audio output")
     sp.add_argument("--max-frames", type=int, default=0)
     sp.add_argument("--no-thread", action="store_true",
                     help="serial loop (default: infer on a worker thread)")

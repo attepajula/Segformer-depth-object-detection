@@ -98,6 +98,17 @@ there's a real multi-door dataset:
 - `segformer/labels.py` is framework-free; `segformer/model/__init__.py` is
   lazy — a `.[torch]`-only install never imports mlx.
 
+## Spatial-audio mock (branch `spatial-consumer-mvp`)
+
+`segformer run --spatial` opens a second window. It mocks the downstream consumer.
+
+- Code: `consumer/spatial.py`. Tests: `tests/test_spatial.py`.
+- Per object: bearing from the mask, distance from the median depth of the eroded mask.
+- Shows a top-down radar and a left/right pan and loudness bar. No audio is played.
+- Distance is unknown (`?`) when the mask has no depth. Bearing is still shown.
+- Only checked on synthetic depth and one recording (`session_rappu`, two railings). No door footage yet.
+- A long object such as a railing gets one point (the median). Fine for an MVP.
+
 ## Working from recordings
 
 `segformer replay <session>/ --loop` publishes a recorded session on ZMQ — a

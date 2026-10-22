@@ -39,6 +39,16 @@ def test_postprocess_shared_logic():
     assert res.instances[0].score == pytest.approx(0.9)
 
 
+def test_stairs_skip_the_door_gate_and_keep_their_label():
+    from segformer.backends.postprocess import probs_to_result
+
+    f = _frame()
+    prob = np.zeros((*f.depth.shape, 2), np.float32)
+    prob[60:90, 10:80, 0] = 0.6          # stairs (id 53): above the 0.45 default, below the door 0.85
+    res = probs_to_result(f, prob, [53, 59], min_area=200, use_depth=True)
+    assert [i.label for i in res.instances] == [53]   # flat depth would fail a door gate
+
+
 def test_torch_backend_matches_mlx_on_a_real_frame():
     pytest.importorskip("torch")
     pytest.importorskip("transformers")
@@ -58,5 +68,5 @@ def test_torch_backend_matches_mlx_on_a_real_frame():
         pytest.skip(f"torch model unavailable: {e}")
     res, _ = seg.infer(fr, None)
     for inst in res.instances:
-        assert inst.label in (14, 38, 95, 58)
+        assert inst.label in (14, 38, 95, 58, 53, 59)
         assert inst.mask.shape == (480, 640)
