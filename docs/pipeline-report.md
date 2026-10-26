@@ -8,7 +8,7 @@ Scope: what happens to one frame of data, step by step, from sensor to sound.
 
 Several assistive devices already help a blind or visually impaired user
 get around safely. There are smart canes, obstacle-avoidance wearables, sensors that
-warn about wha is in the way, some of them providing a real improvement in everyday ease of life. They share one focus: what to avoid. This project points the same kind of hardware at the opposite question — not
+warn about what is in the way, some of them providing a real improvement in everyday ease of life. They share one focus: what to avoid. This project points the same kind of hardware at the opposite question — not
 what is blocking the path, but what is useful on it. A door, a railing, a
 flight of stairs: not hazards, but the landmarks a person actually
 navigates by. This is a proof of concept for finding those, with a depth
@@ -63,7 +63,7 @@ done by the time a frame reaches this pipeline.
 A real frame, side by side: colour on the left, depth colourised on the
 right, near shaded blue and far shaded orange so the gradient reads at a
 glance. The small black spot partway up the depth image is a zero-depth
-pixel. It's chrome door handle and the sensor simply couldn't measure it due to reflectivity. A handful of pixels like that are normal in almost every
+pixel. It is chrome door handle and the sensor simply could not measure it due to reflectivity. A handful of pixels like that are normal in almost every
 frame; what matters later is whether they land inside something the
 system is trying to measure.
 
@@ -79,7 +79,7 @@ The depth sensor also has a real, physical range: roughly 0.8–5 m.
 Closer than that, farther than that, or pointed at glass or a mirror, a
 pixel just reads zero — no reading, not a wrong one. A door's own glass panel
 can blank out part of its own detection this way. That gap in the data
-does not get patched here, since it's hardware related issue.
+does not get patched here, since it is a hardware related issue.
 
 This frame comes from one of two sources, and they're indistinguishable
 once it arrives: a live Xtion camera, or a previously recorded session
@@ -96,7 +96,7 @@ timestamp, intrinsics, …) plus the colour and depth arrays, each as its
 raw bytes alongside its dtype and shape, so the other end can rebuild the
 exact same array without guessing. Nothing is resized, recoloured, or
 otherwise changed. By default nothing is compressed but an lz4
-option exists for it, and it's quite useful since uncompressed feed is 44 megabytes per second.
+option exists for it, and it is quite useful since uncompressed feed is 44 megabytes per second.
 
 This goes out over ZeroMQ as a publish/subscribe stream, one message per
 frame. The consumer side keeps only the newest one: if it is slower than the camera, older frames are dropped instead of getting queued up. Because of this there is no backlog to catch up on.
@@ -123,7 +123,7 @@ The network itself is a 150-class classifier (trained on ADE20K's full label set
 run per pixel at its own native, coarse 128×128 grid (the architecture
 downsamples by 4×, regardless of model size). A softmax turns that into a
 probability per class per pixel; only the 6 classes this project tracks
-(door, screen-door, railing, bannister, stairs, stairway) are kept, the
+(door, screen-door, railing, banister, stairs, stairway) are kept, the
 other 144 are discarded here.
 
 What leaves this stage: a probability, 0 to 1, for 6 classes, at every
@@ -150,7 +150,7 @@ several disconnected blobs for one physical door. Blobs at the same
 depth merge into one mask per door, so a second door farther away stays
 separate. Each merged shape also has to pass a depth check: roughly
 door-sized (0.4–1.9 m wide), flat, upright, tolerant of a door only
-partly in frame. Failure of either checks results to shape being dropped. Railing, bannister,
+partly in frame. Failure of either checks results to shape being dropped. Railing, banister,
 stairs, and stairway skip this step; nothing depth-based filters them
 today.
 
@@ -240,7 +240,7 @@ Stages of the data manipulation, and the properties of the data that leaves that
 | 5 | localisation | a list of cues: bearing, distance (or none), per id |
 | 6 | audio | a continuous stereo signal |
 
-## 8. Open gaps and Reflection
+## 8. Open gaps and reflection
 
 The depth source is the one part of this journey that most plainly needs
 replacing. The Xtion is a structured-light sensor: it projects an infrared
