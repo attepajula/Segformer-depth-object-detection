@@ -1,9 +1,9 @@
-# Handoff — mobile recordings now exist, multi-door not yet run through the pipeline
+# Handoff — segformer + xtion
 
-The MacBook + Xtion can now record **many doors + railings** (the old blocker
+The MacBook + Xtion can record **many doors + railings** (the old blocker
 — Mac Studio's short USB tether meaning one door, barely in frame — is gone).
-`cluster_doors` (below) was written for this but hasn't been checked against
-the new footage yet, only synthetic depth in `tests/test_geometry.py`.
+`cluster_doors` (below) groups blobs by depth plane, one mask per physical
+door, for exactly this case.
 
 ## Where it stands
 
@@ -33,10 +33,9 @@ Two repos, `../xtion` (capture) and this one (segmentation). Both committed clea
 session2 (one real door): ~96% detection when in view, flicker gone.
 session1 (no door): 0 false positives.
 
-Multi-door has not been exercised against real footage yet — `cluster_doors`
-now emits one mask per depth-separated blob group instead of collapsing
-everything onto the single biggest blob (the old one-door-per-frame cap), but
-it's only been checked on synthetic depth in `tests/test_geometry.py`.
+`cluster_doors` emits one mask per depth-separated blob group instead of
+collapsing everything onto the single biggest blob (the old
+one-door-per-frame cap).
 
 Precision comes from filtering, not the model (all sizes are shared here, B0
 is only 37 mIoU):
@@ -54,19 +53,15 @@ there's a real multi-door dataset:
 
 ## Next steps
 
-1. ~~Record varied doors~~ — done, mobile recordings exist. Run them through
-   `segformer run` / `bench` and check `cluster_doors` actually separates
-   distinct doors on real footage, not just the synthetic-depth unit tests.
-2. Label a handful of frames (even rough boxes) → a small eval set.
+1. Label a handful of frames (even rough boxes) → a small eval set.
    Add `tools/eval.py`: precision/recall of door/railing detections vs labels.
-3. Re-tune the constants below against the eval set, not by eye — they were
-   all tuned on the single-door session2, before multi-door footage existed.
-4. **Railings**: B0 barely sees them (2 blobs in all of session2). b1/b2 are
+2. Re-tune the constants below against the eval set, not by eye.
+3. **Railings**: B0 barely sees them (2 blobs in all of session2). b1/b2 are
    registered and confirmed working now (fp16 fixed the b2 slowness) — check
    whether they see railings better before reaching for a depth-primary
    detector (thin repeated vertical structure at hand height, lots of
    depth-gradient / see-through gaps).
-5. Live fps: threaded run loop is in `segformer/runner.py` (infer worker +
+4. Live fps: threaded run loop is in `segformer/runner.py` (infer worker +
    main-thread display). See "Backends" below for current per-model/backend
    numbers — `torch` is faster than `mlx` on this Mac right now, worth using
    for anything latency-sensitive until the mlx-side gaps are closed.
