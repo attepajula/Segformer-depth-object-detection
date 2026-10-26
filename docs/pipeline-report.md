@@ -1,4 +1,4 @@
-# Help for Visually Impaired People (placeholder)— Technical Report
+# Help for Visually Impaired with Auditory Navigation — Technical Report
 
 Scope: what happens to one frame of data, step by step, from sensor to sound.
 
@@ -155,7 +155,7 @@ stairs, and stairway skip this step; nothing depth-based filters them
 today.
 
 Fourth, a shape has to persist: three frames running to be reported,
-lingering six frames after it's lost, so one missed frame doesn't
+lingering six frames after it is lost, so one missed frame does not
 flicker a detection on and off.
 
 What leaves this stage: a list of detections, each with a stable id,
@@ -227,7 +227,7 @@ input that device will have, such as a small set of buttons. Any such
 signal can drive the same mute logic with a small code change, since the
 toggle itself does not depend on how it is triggered.
 
-## 7. Summary table
+## 7. Table 1. Summary of data manipulation stages
 
 One row per stage: what the data *is* leaving it.
 
@@ -260,3 +260,5 @@ values came from. Replacing the Xtion with a lidar sensor means producing
 the same `Frame` contract from different hardware; it does not require a
 change to the network, the filtering stage, the localisation stage, or the
 audio stage.
+
+Claude Sonnet 6 was used to polish, improve and language-check this report.
