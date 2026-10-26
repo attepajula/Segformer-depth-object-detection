@@ -230,6 +230,7 @@ toggle itself does not depend on how it is triggered.
 ## 7. Table 1. Summary of data manipulation stages
 
 Stages of the data manipulation, and the properties of the data that leaves that stage (consequently entering the next stage) are given.
+
 | § | stage | data, leaving |
 |---|---|---|
 | 1 | capture | one `Frame`: 640×480×3 colour, 640×480 depth, intrinsics |
