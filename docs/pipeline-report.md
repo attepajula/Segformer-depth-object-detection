@@ -166,7 +166,7 @@ in §0's figure, drawn.
 
 ## 5. Turning a detection into a place in space
 
-<img src="../figures/range_export.png" alt="A top-down view: the observer at the centre, a detection placed by its bearing and distance" width="320" align="right" style="margin: 0 0 16px 16px">
+<img src="../figures/range_export.png" alt="A top-down view: the observer at the centre, a detection placed by its bearing and distance" width="180" align="right">
 
 A detection, at this point, is a shape in a 2D image. Converting it into a
 direction and a distance is the responsibility of this stage, not the
