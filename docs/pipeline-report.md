@@ -1,7 +1,9 @@
 # Help for Visually Impaired with Auditory Navigation — Technical Report
 
-Scope: what happens to one frame of data, step by step, from sensor to sound.
-
+26.10.2026 <br>
+Atte Pajula, Patrik Pakkanen, Ebru Yaman <br>
+Project Report for DATA11001 <br>
+University of Helsinki <br>
 ## 0. Introduction
 
 <img src="../figures/detect_export.png" alt="A door detected and outlined, labelled &quot;door 1.34&quot;" width="260" align="left" style="margin: 0 16px 0px 0">
@@ -35,7 +37,7 @@ tone out.
 ### Pipeline at a glance
 
 <p align="center">
-  <img src="../figures/pipeline.svg" alt="Pipeline diagram: depth camera through neural network, filtering, tracking, direction/distance, to spatial audio" width="900">
+  <img src="../figures/pipeline.svg" alt="Pipeline diagram: depth camera through neural network, filtering, tracking, direction/distance, to spatial audio" width="580">
 </p>
 
 Two things to notice: the depth check only runs for door and screen-door.
