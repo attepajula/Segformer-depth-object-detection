@@ -221,6 +221,8 @@ $PY -m segformer run --backend torch --save out/                          # head
 | `--save DIR` | none | write one PNG per frame to `DIR` instead of / as well as showing a window |
 | `--no-spatial` | off (spatial **on** by default) | skip the spatial-audio consumer -- the radar window and its one-tone-per-class audio. See "Spatial view" below. |
 | `--mute` | off | keep the radar window, skip its audio |
+| `--record PATH` | none | write the overlay + spatial windows, side by side, to one video file at `PATH` — with sound, unless `--mute`. Needs both windows (`--overlay` on, spatial on — the default). See "Recording" below. |
+| `--record-fps N` | `15` | playback rate for `--record` — a fixed rate, not the measured inference fps |
 | `--max-frames N` | `0` (unlimited) | stop after `N` frames |
 | `--no-thread` | off | run the old serial loop (decode→infer→draw, one thread) instead of the default worker-thread + display-thread split. `run` with no flags at all still opens the spatial window (on by default) and runs threaded; pass `--no-spatial` too for the old bare print-only serial loop. |
 
@@ -244,6 +246,24 @@ drops its audio.
   end user is blind, so that chirp is the real feedback; the HUD on the
   radar panel showing the same state is only for a sighted dev at a terminal.
 - Press `q` in either window to quit.
+
+#### Recording (`--record PATH`)
+
+```sh
+PY=.venv/bin/python
+$PY -m segformer run --backend torch --overlay --record out/demo.mp4
+```
+
+Writes the overlay window and the spatial window side by side into one
+video file. The sound is real: `consumer/audio.py` taps the exact samples
+it hands to the speaker (not a system-audio capture) and writes them to a
+temp WAV alongside a temp silent video; both get muxed together with
+`ffmpeg` into `PATH` when the run ends, then cleaned up. Mute toggles and
+chirps are in the recording, since they're part of that same signal.
+
+No `ffmpeg` on the machine, or `--mute`, or the audio device never opened:
+the output is still written, just as video with no audio track — `run`
+says so when it finishes.
 
 ### `bench` — per-frame latency / fps, no display
 
@@ -299,6 +319,7 @@ Recordings are large (GB/minute) and not in git — move them out of band. Forma
 | `runner.py` — threaded run loop | done |
 | `consumer/spatial.py` — spatial cues (direction/distance), on by default | done. Draws the radar. Checked on synthetic depth and one real recording. |
 | `consumer/audio.py` — spatial audio for the cues | done. One tone per class (door/railing/stairs), panned left/right by direction. Press 1/2/3 to mute one; a short sound confirms it, since the user can't see a screen. |
+| `segformer/recorder.py` — `--record`, overlay+spatial to one video with sound | done. Muxed with `ffmpeg`; falls back to video-only if it's not installed. |
 | `bench` command | done |
 | perf (session2, Mac Studio M1 Max, 150 frames) — see table below | ok |
 

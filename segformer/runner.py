@@ -56,8 +56,18 @@ def _show_waiting(endpoint: str) -> bool:
 
 def run_threaded(endpoint: str, segmenter, *, show: bool = True,
                  save_dir=None, max_frames: int = 0, spatial: bool = True,
-                 mute: bool = False) -> int:
+                 mute: bool = False, record: str | None = None,
+                 record_fps: float = 15.0) -> int:
     audio = None
+    recorder = None
+    record_video_tmp = record_audio_tmp = None
+    if record:
+        import pathlib
+
+        from segformer.recorder import temp_paths
+
+        pathlib.Path(record).parent.mkdir(parents=True, exist_ok=True)
+        record_video_tmp, record_audio_tmp = temp_paths(record)
     if spatial:
         from consumer import spatial as spatial_view
 
@@ -69,9 +79,17 @@ def run_threaded(endpoint: str, segmenter, *, show: bool = True,
             if audio.start():
                 print("  spatial audio: keys 1/2/3 in the spatial window toggle "
                       "door/railing/stairs sound, q quits")
+    if record:
+        from segformer.recorder import WindowRecorder
+
+        recorder = WindowRecorder(record_video_tmp, fps=record_fps)
+        recorder.start()
+        print(f"  recording overlay + spatial to {record} "
+              f"({record_fps:.0f} fps{'' if audio is not None else ', no audio -- muted'})")
+    recording_begun = False   # True once the first real frame starts both tracks together
     stop = threading.Event()
     latest = _Latest()
-    state = {"fps": 0.0, "n": 0}
+    state = {"fps": 0.0, "n": 0, "restarted": False}
 
     def worker() -> None:
         consumer = FrameConsumer(endpoint)          # socket owned by this thread
@@ -83,7 +101,14 @@ def run_threaded(endpoint: str, segmenter, *, show: bool = True,
                 if frame is None:
                     continue
                 if prev_id is not None and frame.frame_id <= prev_id:
-                    segmenter.reset()
+                    segmenter.reset()          # stream restarted (replay loop / reopen)
+                    # new instance ids start from 1 again -- flag it for the
+                    # main thread to reset its own smoother (CueSmoother
+                    # isn't thread-safe, can't reset it from here); without
+                    # this the smoother keeps the previous loop's id=1
+                    # azimuth/distance and smooths the new detection toward
+                    # it, a visible and audible jump right at the loop point
+                    state["restarted"] = True
                 prev_id = frame.frame_id
                 result, _ = segmenter.infer(frame, None)
                 state["fps"] = meter.tick()
@@ -132,12 +157,24 @@ def run_threaded(endpoint: str, segmenter, *, show: bool = True,
             if show and not overlay.show(img, key=key):
                 stop.set()
             if spatial:
+                if state["restarted"]:
+                    smoother.reset()
+                    state["restarted"] = False
                 cues = smoother.update(spatial_view.compute_cues(frame, result))
                 muted = frozenset()
                 if audio is not None:
                     audio.update(cues)
                     muted = audio.muted_voices()
                 radar = spatial_view.render(cues, frame.intrinsics, muted=muted)
+                if recorder is not None:
+                    if not recording_begun:
+                        # this frame is both tracks' zero point -- see
+                        # AudioRenderer.begin_recording's docstring for why
+                        # it can't just start with audio.start() instead
+                        if audio is not None:
+                            audio.begin_recording(record_audio_tmp)
+                        recording_begun = True
+                    recorder.update(img, radar)
                 if not spatial_view.show(radar, audio=audio, key=key):
                     stop.set()
     except KeyboardInterrupt:
@@ -147,7 +184,13 @@ def run_threaded(endpoint: str, segmenter, *, show: bool = True,
         t.join(timeout=2.0)
         segmenter.close()
         if audio is not None:
-            audio.stop()
+            audio.stop()                          # finishes the WAV file, if recording
+        if recorder is not None:
+            recorder.close()                      # finishes the silent video file
+            from segformer.recorder import mux
+
+            has_sound = mux(record_video_tmp, record_audio_tmp, record)
+            print(f"  wrote {record}" + ("" if has_sound else " (no audio track)"))
         if show or spatial:
             import cv2
 

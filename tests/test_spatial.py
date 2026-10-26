@@ -3,6 +3,7 @@
 import math
 
 import numpy as np
+import pytest
 
 from consumer.spatial import Cue, CueSmoother, compute_cues, render
 from segformer.segmenter import Instance, SegResult
@@ -79,6 +80,27 @@ def test_smoother_smooths_and_forgets():
     for _ in range(12):
         s.update([])
     assert s._state == {}
+
+
+def test_smoother_reset_drops_stale_state_for_a_reused_id():
+    # the exact replay-loop scenario: the tracker's ids restart from 1 after
+    # a stream restart, but without resetting the smoother too, a reused id
+    # gets heavily smoothed toward the PREVIOUS loop's last known position
+    # for that same id -- a jump in both the radar and the audio pan/gain,
+    # right at the loop point.
+    s = CueSmoother()
+    end_of_previous_loop = Cue(1, 14, -1.2, 5.0, -0.9, 0.2)   # far left, far away
+    s.update([end_of_previous_loop])
+
+    s.reset()   # what the stream-restart branch must call
+
+    start_of_new_loop = Cue(1, 14, 0.0, 1.0, 0.0, 0.9)        # dead ahead, close
+    (out,) = s.update([start_of_new_loop])
+
+    # with the reset, id 1 is smoothed against nothing -- the raw cue comes
+    # straight through, not dragged toward the stale far-left/far-away value
+    assert out.azimuth_rad == pytest.approx(0.0)
+    assert out.distance_m == pytest.approx(1.0)
 
 
 def test_render_draws_with_and_without_cues():

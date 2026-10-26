@@ -50,15 +50,32 @@ def cmd_run(args) -> int:
 
     args.spatial = not args.no_spatial    # on by default -- see "--no-spatial" help
 
+    if args.record and not (args.overlay and args.spatial):
+        print("  --record needs both --overlay and spatial on (spatial is on by "
+              "default -- don't pass --no-spatial) -- nothing to put side by side "
+              "otherwise")
+        return 1
+
     has_display = args.overlay or args.save or args.spatial
     if has_display and not args.no_thread:
         from segformer.runner import run_threaded
 
         print(f"segformer run (threaded): backend={seg.name} endpoint={args.endpoint} "
-              f"overlay={args.overlay} save={args.save or '-'} spatial={args.spatial}")
+              f"overlay={args.overlay} save={args.save or '-'} spatial={args.spatial} "
+              f"record={args.record or '-'}")
         run_threaded(args.endpoint, seg, show=args.overlay, save_dir=args.save,
-                     max_frames=args.max_frames, spatial=args.spatial, mute=args.mute)
+                     max_frames=args.max_frames, spatial=args.spatial, mute=args.mute,
+                     record=args.record, record_fps=args.record_fps)
         return 0
+
+    record_video_tmp = record_audio_tmp = None
+    if args.record:
+        import pathlib
+
+        from segformer.recorder import temp_paths
+
+        pathlib.Path(args.record).parent.mkdir(parents=True, exist_ok=True)
+        record_video_tmp, record_audio_tmp = temp_paths(args.record)
 
     if args.spatial:
         from consumer import spatial as spatial_view
@@ -85,6 +102,16 @@ def cmd_run(args) -> int:
         save_dir = pathlib.Path(args.save)
         save_dir.mkdir(parents=True, exist_ok=True)
 
+    recorder = None
+    recording_begun = False   # True once the first real frame starts both tracks together
+    if args.record:
+        from segformer.recorder import WindowRecorder
+
+        recorder = WindowRecorder(record_video_tmp, fps=args.record_fps)
+        recorder.start()
+        print(f"  recording overlay + spatial to {args.record} "
+              f"({args.record_fps:.0f} fps{'' if audio is not None else ', no audio -- muted'})")
+
     print(f"segformer run: backend={seg.name} endpoint={args.endpoint} "
           f"overlay={args.overlay} save={args.save or '-'}")
     try:
@@ -95,6 +122,13 @@ def cmd_run(args) -> int:
             if prev_id is not None and frame.frame_id <= prev_id:
                 seg.reset()          # stream restarted (replay loop / reopen)
                 state = None
+                if args.spatial:
+                    # new instance ids start from 1 again (seg.reset() above
+                    # resets the tracker) -- without this, the smoother keeps
+                    # the previous loop's id=1 azimuth/distance and heavily
+                    # smooths the new detection toward it, a visible and
+                    # audible jump right at the loop point
+                    smoother.reset()
             prev_id = frame.frame_id
 
             result, state = seg.infer(frame, state)
@@ -120,6 +154,15 @@ def cmd_run(args) -> int:
                     audio.update(cues)
                     muted = audio.muted_voices()
                 radar = spatial_view.render(cues, frame.intrinsics, muted=muted)
+                if recorder is not None:
+                    if not recording_begun:
+                        # this frame is both tracks' zero point -- see
+                        # AudioRenderer.begin_recording's docstring for why
+                        # it can't just start with audio.start() instead
+                        if audio is not None:
+                            audio.begin_recording(record_audio_tmp)
+                        recording_begun = True
+                    recorder.update(img, radar)
                 if not spatial_view.show(radar, audio=audio, key=key):
                     break
 
@@ -132,7 +175,13 @@ def cmd_run(args) -> int:
         consumer.close()
         seg.close()
         if args.spatial and audio is not None:
-            audio.stop()
+            audio.stop()                          # finishes the WAV file, if recording
+        if recorder is not None:
+            recorder.close()                      # finishes the silent video file
+            from segformer.recorder import mux
+
+            has_sound = mux(record_video_tmp, record_audio_tmp, args.record)
+            print(f"  wrote {args.record}" + ("" if has_sound else " (no audio track)"))
     print(f"processed {n} frames")
     return 0
 
@@ -273,6 +322,13 @@ def build_parser() -> argparse.ArgumentParser:
                          "1/2/3 in that window mute/unmute a class, confirmed by a chirp.")
     sp.add_argument("--mute", action="store_true",
                     help="keep the radar window, skip its audio output")
+    sp.add_argument("--record", default=None, metavar="PATH",
+                    help="write overlay + spatial windows side by side to one video "
+                         "file. Needs both --overlay and spatial on (spatial is "
+                         "already on by default).")
+    sp.add_argument("--record-fps", type=float, default=15.0,
+                    help="playback rate for --record (default 15) -- a fixed rate, "
+                         "not the measured inference fps")
     sp.add_argument("--max-frames", type=int, default=0)
     sp.add_argument("--no-thread", action="store_true",
                     help="serial loop (default: infer on a worker thread)")

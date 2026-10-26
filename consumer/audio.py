@@ -22,7 +22,9 @@ terminal, never the mechanism itself.
 
 from __future__ import annotations
 
+import queue
 import threading
+import wave
 
 import numpy as np
 
@@ -150,11 +152,15 @@ class AudioRenderer:
         self._chirp: np.ndarray | None = None
         self._chirp_pos = 0
         self._stream = None
+        self._record_queue: queue.Queue | None = None
+        self._record_thread: threading.Thread | None = None
 
     def start(self) -> bool:
         """Open the output stream. Returns False (and warns once) if
         ``sounddevice`` / the audio device isn't available -- the caller
-        keeps running silently, visual-only."""
+        keeps running silently, visual-only. Recording (if any) is a
+        separate step: ``begin_recording()``, called once the first real
+        frame is in hand, not here -- see its docstring for why."""
         try:
             import sounddevice as sd
         except ImportError:
@@ -171,6 +177,49 @@ class AudioRenderer:
             print(f"  spatial audio: couldn't open an output device ({e}) -- running silent")
             self._stream = None
             return False
+
+    def begin_recording(self, path: str) -> None:
+        """Start writing this renderer's exact output samples -- the same
+        mix the speaker gets, mute toggles and chirps included -- to a WAV
+        file, for ``run --record`` to mux into the video.
+
+        Call this once, at the moment the first real frame is in hand, not
+        from ``start()``: the output stream opens (and so this renderer
+        starts producing real-time samples) as soon as the process is set
+        up, well before the first frame has even arrived over the network
+        -- model load, the ZMQ connection, the first inference, all of it.
+        Recording from ``start()`` would put that whole setup gap, as
+        silence, at the front of the WAV, while the video (which only ever
+        writes a frame once it has one) has no such gap -- so the two
+        tracks would line up at the end but the audio would read as
+        arriving massively late relative to what's on screen for the
+        entire recording. Both tracks need the same zero point: the first
+        real frame, not "whenever this object happened to start up."
+
+        A separate thread drains a queue the callback only ever pushes to,
+        so recording can never block the realtime callback."""
+        self._record_queue = queue.Queue()
+        self._record_thread = threading.Thread(
+            target=self._record_writer_loop, args=(path,), daemon=True)
+        self._record_thread.start()
+
+    def _record_writer_loop(self, path: str) -> None:
+        import os
+
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        wf = wave.open(path, "wb")
+        wf.setnchannels(2)
+        wf.setsampwidth(2)   # int16 PCM -- `wave` doesn't do float
+        wf.setframerate(SAMPLE_RATE)
+        try:
+            while True:
+                block = self._record_queue.get()
+                if block is None:   # stop() sentinel
+                    break
+                pcm = (np.clip(block, -1.0, 1.0) * 32767.0).astype("<i2")
+                wf.writeframes(pcm.tobytes())
+        finally:
+            wf.close()
 
     def update(self, cues) -> None:
         targets = levels_for_cues(cues)
@@ -207,6 +256,11 @@ class AudioRenderer:
             self._stream.stop()
             self._stream.close()
             self._stream = None
+        if self._record_queue is not None:
+            self._record_queue.put(None)        # sentinel: writer loop closes the file and exits
+            self._record_thread.join(timeout=2.0)
+            self._record_queue = None
+            self._record_thread = None
 
     def _callback(self, outdata, frames, _time_info, _status) -> None:  # pragma: no cover (needs hardware)
         try:
@@ -237,6 +291,8 @@ class AudioRenderer:
                 out[:len(chirp_seg), 1] += chirp_seg
                 np.clip(out, -1.0, 1.0, out=out)   # chirp rides on top of the already-clipped mix
             outdata[:] = out
+            if self._record_queue is not None:
+                self._record_queue.put_nowait(out.copy())
             self._sample_idx = (self._sample_idx + frames) % SAMPLE_RATE
         except Exception as e:
             outdata.fill(0.0)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import wave
+
 import numpy as np
 import pytest
 
@@ -157,3 +159,45 @@ def test_phase_is_continuous_across_the_sample_idx_wrap():
     assert np.allclose(tail, joined)
     assert all(name in VOICES for name in ("door", "railing", "stairs"))
     assert head.shape == tail.shape
+
+
+def test_record_wav_writes_the_exact_blocks_pushed_to_it(tmp_path):
+    # start()'s own sounddevice/device setup is exercised separately by just
+    # not crashing (real hardware may or may not be present here); this test
+    # drives the record queue directly, as _callback would, to check the
+    # writer thread/WAV file side on its own.
+    path = tmp_path / "out.wav"
+    r = AudioRenderer()
+    try:
+        r.start()
+        r.begin_recording(str(path))
+        block = _render_block(1024, 0, {"door": (1.0, 0.0)})
+        for _ in range(3):
+            r._record_queue.put_nowait(block)
+    finally:
+        r.stop()
+
+    assert path.exists()
+    with wave.open(str(path), "rb") as wf:
+        assert wf.getnchannels() == 2
+        assert wf.getsampwidth() == 2
+        assert wf.getframerate() == SAMPLE_RATE
+        assert wf.getnframes() == 1024 * 3
+
+
+def test_record_queue_only_exists_after_begin_recording(tmp_path):
+    # the actual bug this two-step API fixes: start() opens the output
+    # stream (so the callback can already be producing real-time samples,
+    # e.g. while waiting for the first real frame) well before the caller
+    # is ready to begin recording. _callback only ever pushes to
+    # _record_queue, and that queue doesn't exist until begin_recording()
+    # is called -- so nothing produced before that call can land in the
+    # WAV, structurally, not by filtering it out after the fact.
+    r = AudioRenderer()
+    try:
+        r.start()
+        assert r._record_queue is None
+        r.begin_recording(str(tmp_path / "out.wav"))
+        assert r._record_queue is not None
+    finally:
+        r.stop()
