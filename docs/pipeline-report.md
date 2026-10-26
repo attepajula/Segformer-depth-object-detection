@@ -229,8 +229,7 @@ toggle itself does not depend on how it is triggered.
 
 ## 7. Table 1. Summary of data manipulation stages
 
-One row per stage: what the data *is* leaving it.
-
+Stages of the data manipulation, and the properties of the data that leaves that stage (consequently entering the next stage) are given.
 | § | stage | data, leaving |
 |---|---|---|
 | 1 | capture | one `Frame`: 640×480×3 colour, 640×480 depth, intrinsics |
@@ -240,7 +239,7 @@ One row per stage: what the data *is* leaving it.
 | 5 | localisation | a list of cues: bearing, distance (or none), per id |
 | 6 | audio | a continuous stereo signal |
 
-## 8. Open gaps
+## 8. Open gaps and Reflection
 
 The depth source is the one part of this journey that most plainly needs
 replacing. The Xtion is a structured-light sensor: it projects an infrared
@@ -260,5 +259,7 @@ values came from. Replacing the Xtion with a lidar sensor means producing
 the same `Frame` contract from different hardware; it does not require a
 change to the network, the filtering stage, the localisation stage, or the
 audio stage.
+
+In terms of design process and planning, we faced issues in determining who this project would serve. We suspected from the beginning that we were unlikely to create an application usable by the target audience, because of challenges relating to developing for consumer products like mobile phones. So we decided to stick with the hardware we had, and focus more on the conceptual benefits this project may provide. We thought that this might be useful for various robotics applications, but decided to limit our focus to navigation for people. This also lead us to make our final delivery a website in which we present our project. We aimed to make the website easily accessible to screen readers, and kept it structurally simple for easy navigation through the text blocks. The website and reading experience could be further improved by adding accommodations for low-vision readers, such as a menu for adjusting the font size and style. This project has been a valuable learning experience for data science, project design and organisation for all of us.
 
 Claude Sonnet 6 was used to polish, improve and language-check this report.
